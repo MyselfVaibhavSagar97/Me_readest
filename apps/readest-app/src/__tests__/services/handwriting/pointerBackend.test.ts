@@ -161,6 +161,32 @@ describe('PointerHandwritingBackend stylus-only palm rejection', () => {
     expect(points.map((p) => p.slice(0, 2))).toEqual([[30, 40]]);
   });
 
+  it('lets the touch sequence through, so a finger can still scroll the page', () => {
+    const { el, backend } = setup();
+    backend.setPenOnly(true);
+
+    // With touch rejected as input, the hand is free to pan the view; claiming
+    // the sequence would leave a scrollable note that cannot be scrolled.
+    const start = new Event('touchstart', { cancelable: true });
+    const move = new Event('touchmove', { cancelable: true });
+    el.dispatchEvent(start);
+    el.dispatchEvent(move);
+
+    expect(start.defaultPrevented).toBe(false);
+    expect(move.defaultPrevented).toBe(false);
+  });
+
+  it('claims the touch sequence again once stylus-only is off', () => {
+    const { el, backend } = setup();
+    backend.setPenOnly(true);
+    backend.setPenOnly(false);
+
+    const start = new Event('touchstart', { cancelable: true });
+    el.dispatchEvent(start);
+
+    expect(start.defaultPrevented).toBe(true);
+  });
+
   it('leaves a mouse alone: stylus-only rejects touch, not other devices', () => {
     const { el, backend, points } = setup();
     backend.setPenOnly(true);
