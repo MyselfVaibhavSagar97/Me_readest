@@ -1,9 +1,15 @@
 import type { InkStroke } from './model';
 import type { PageRect } from './coords';
+import { DEFAULT_NIB, nibAlpha, nibIsSoft, nibRadius, nibVaries } from './nibs';
 
-// Ordinary pressure (0.5) draws the pen width; a feather touch half of it, a
-// firm press half again more. A stroke without pressure draws the pen width.
-const pressureScale = (p: number | undefined) => 0.5 + (p ?? 0.5);
+/**
+ * Ink drawn before notes offered a choice of pen, and all of the reader's
+ * own ink, carries no nib or sensitivity. The defaults below reproduce what
+ * the renderer did then exactly: a round nib at full pressure response, where
+ * ordinary pressure (0.5) draws the pen width, a feather touch half of it and
+ * a firm press half again more.
+ */
+const DEFAULT_SENSITIVITY = 1;
 
 // Light enough that the text under a marker stays easy to read.
 const MARKER_OPACITY = 0.45;
@@ -25,15 +31,23 @@ type Disc = [number, number, number];
 // enough that the outline never shows a facet on a curve.
 const STEP = 1.5;
 
-/** Discs along the stroke's curve, sized by the pressure interpolated there. */
-const discsAlong = (pieces: Piece[], radius: (p: number | undefined) => number): Disc[] => {
-  const discs: Disc[] = [];
+/**
+ * Discs along the stroke's curve, sized by the pressure interpolated there
+ * and by the direction of travel — which a flat nib needs, because it draws
+ * broad across its edge and fine along it. The direction is taken from each
+ * sample's neighbours, so positions are collected first and sized after.
+ */
+const discsAlong = (
+  pieces: Piece[],
+  radius: (p: number | undefined, angle: number) => number,
+): Disc[] => {
+  const samples: Sample[] = [];
   for (const { from, via, to } of pieces) {
     const length = via
       ? Math.hypot(via[0] - from[0], via[1] - from[1]) + Math.hypot(to[0] - via[0], to[1] - via[1])
       : Math.hypot(to[0] - from[0], to[1] - from[1]);
     const n = Math.max(1, Math.ceil(length / STEP));
-    for (let k = discs.length ? 1 : 0; k <= n; k++) {
+    for (let k = samples.length ? 1 : 0; k <= n; k++) {
       const t = k / n;
       const [x, y] = via
         ? [
@@ -45,8 +59,17 @@ const discsAlong = (pieces: Piece[], radius: (p: number | undefined) => number):
         from[2] === undefined || to[2] === undefined
           ? (from[2] ?? to[2])
           : from[2] + (to[2] - from[2]) * t;
-      discs.push([x, y, radius(p)]);
+      samples.push([x, y, p]);
     }
+  }
+
+  const discs: Disc[] = [];
+  for (let i = 0; i < samples.length; i++) {
+    const previous = samples[Math.max(0, i - 1)]!;
+    const next = samples[Math.min(samples.length - 1, i + 1)]!;
+    const sample = samples[i]!;
+    const angle = Math.atan2(next[1] - previous[1], next[0] - previous[0]);
+    discs.push([sample[0], sample[1], radius(sample[2], angle)]);
   }
   return discs;
 };
@@ -123,12 +146,17 @@ export const renderStrokes = (
     ctx.fillStyle = stroke.color;
 
     const marker = stroke.tool === 'marker';
+    const nib = stroke.nib ?? DEFAULT_NIB;
+    const sensitivity = stroke.sensitivity ?? DEFAULT_SENSITIVITY;
+    const alpha = marker ? MARKER_OPACITY : nibAlpha(nib);
+
     if (pts.length === 1) {
       ctx.save();
-      if (marker) ctx.globalAlpha = MARKER_OPACITY;
+      ctx.globalAlpha = alpha;
       ctx.beginPath();
-      const scale = marker ? 1 : pressureScale(pts[0]![2]);
-      ctx.arc(pts[0]![0], pts[0]![1], (base * scale) / 2, 0, Math.PI * 2);
+      // A dot has no direction to hold a flat nib against, so it is round.
+      const radius = marker ? base / 2 : nibRadius(nib, base, pts[0]![2], 0, sensitivity);
+      ctx.arc(pts[0]![0], pts[0]![1], radius, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
       continue;
@@ -169,22 +197,37 @@ export const renderStrokes = (
     }
 
     const hasPressure = pts.some((p) => p[2] !== undefined);
-    if (!hasPressure) {
+    if (!nibVaries(nib, sensitivity, hasPressure)) {
+      ctx.save();
+      ctx.globalAlpha = alpha;
       ctx.lineWidth = base;
       smoothPath();
       ctx.stroke();
+      ctx.restore();
       continue;
     }
 
-    // A pen stroke's width follows its pressure, so it is filled as one
-    // outline traced around discs every STEP along the curve. Stroking pieces
-    // of varying width instead blends their soft edges again at every joint,
-    // which reads as a jagged, beaded edge.
+    // A stroke of changing width is filled as one outline traced around discs
+    // every STEP along the curve. Stroking pieces of varying width instead
+    // blends their soft edges again at every joint, which reads as a jagged,
+    // beaded edge.
+    const discs = discsAlong(pieces, (p, angle) => nibRadius(nib, base, p, angle, sensitivity));
+    ctx.save();
+    // A soft brush gets a fainter, wider pass underneath the solid one, which
+    // reads as a feathered edge rather than a cut one.
+    if (nibIsSoft(nib)) {
+      ctx.globalAlpha = alpha * 0.3;
+      ctx.beginPath();
+      traceOutline(
+        ctx,
+        discs.map(([x, y, r]): Disc => [x, y, r * 1.3]),
+      );
+      ctx.fill();
+    }
+    ctx.globalAlpha = alpha;
     ctx.beginPath();
-    traceOutline(
-      ctx,
-      discsAlong(pieces, (p) => (base * pressureScale(p ?? 0.5)) / 2),
-    );
+    traceOutline(ctx, discs);
     ctx.fill();
+    ctx.restore();
   }
 };

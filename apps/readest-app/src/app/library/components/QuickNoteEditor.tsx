@@ -19,6 +19,7 @@ import type { InkTool } from '@/services/handwriting/model';
 import { QUICK_NOTE_ASPECT, type QuickNote } from '@/types/notes';
 import AnnotationToolButton from '@/app/reader/components/annotator/AnnotationToolButton';
 import HandwritingOptions from '@/app/reader/components/handwriting/HandwritingOptions';
+import PenPanel from './PenPanel';
 import { useQuickNoteInk } from '../hooks/useQuickNoteInk';
 
 /**
@@ -57,7 +58,7 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
   const areaRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
-  const [optionsOpen, setOptionsOpen] = useState(false);
+  const [openPanel, setOpenPanel] = useState<InkTool | null>(null);
   const ink = useQuickNoteInk(note);
   const { attachCanvas, setPageRect, strokes } = ink;
 
@@ -122,7 +123,7 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
     <T,>(select: (value: T) => void) =>
     (value: T) => {
       select(value);
-      setOptionsOpen(false);
+      setOpenPanel(null);
     };
 
   return (
@@ -130,43 +131,44 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
       role='dialog'
       aria-label={_('Quick Note')}
       className='bg-base-200 fixed inset-0 z-50 flex flex-col'
-      style={{ paddingTop: `${safeAreaInsets?.top ?? 0}px` }}
     >
-      <div ref={areaRef} className='flex min-h-0 flex-1 items-center justify-center'>
-        {size && (
-          <canvas
-            ref={setCanvas}
-            aria-label={_('Note Page')}
-            className='eink-bordered border-base-300/60 border'
-            style={{
-              width: size.width,
-              height: size.height,
-              backgroundColor: PAPER,
-              touchAction: 'none',
-              userSelect: 'none',
-              WebkitUserSelect: 'none',
-              WebkitTouchCallout: 'none',
-            }}
-          />
-        )}
-      </div>
       <div
         className={clsx(
           'eink-bordered bg-base-100 border-base-300/50 relative z-10 flex items-center',
-          'box-content h-13 justify-between border-t px-3',
+          'box-content h-13 justify-between border-b px-3',
         )}
-        style={{ paddingBottom: `${(safeAreaInsets?.bottom ?? 0) / 3}px` }}
+        style={{ paddingTop: `${safeAreaInsets?.top ?? 0}px` }}
       >
-        {optionsOpen && (
-          <div className='eink-bordered bg-base-100 border-base-300/50 not-eink:shadow-md absolute bottom-full start-3 mb-2 rounded-2xl border px-3 py-2'>
-            <HandwritingOptions
-              tool={ink.tool}
-              color={ink.color}
-              width={ink.width}
-              onSelectColor={choose(ink.selectColor)}
-              onSelectWidth={choose(ink.selectWidth)}
+        {openPanel && (
+          <>
+            {/* Tapping anywhere else closes the panel, including on the page,
+                where a tap would otherwise leave a dot of ink behind it. */}
+            <button
+              type='button'
+              aria-label={_('Close')}
+              tabIndex={-1}
+              onClick={() => setOpenPanel(null)}
+              className='fixed inset-0 z-0 cursor-default'
             />
-          </div>
+            <div
+              className={clsx(
+                'eink-bordered bg-base-100 border-base-300/50 not-eink:shadow-md',
+                'absolute top-full start-3 z-10 mt-2 rounded-2xl border px-3 py-3',
+              )}
+            >
+              {openPanel === 'pen' ? (
+                <PenPanel pen={ink.pen} onChange={ink.updatePen} />
+              ) : (
+                <HandwritingOptions
+                  tool={ink.tool}
+                  color={ink.color}
+                  width={ink.width}
+                  onSelectColor={choose(ink.selectColor)}
+                  onSelectWidth={choose(ink.selectWidth)}
+                />
+              )}
+            </div>
+          </>
         )}
         <div className='flex items-center gap-2'>
           {TOOLS.map(({ tool, label, Icon }) => {
@@ -177,12 +179,12 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
                 type='button'
                 aria-label={_(label)}
                 aria-pressed={active}
-                aria-expanded={active ? optionsOpen : undefined}
+                aria-expanded={active ? openPanel === tool : undefined}
                 onClick={() => {
                   if (active) {
-                    setOptionsOpen((open) => !open);
+                    setOpenPanel((open) => (open === tool ? null : tool));
                   } else {
-                    setOptionsOpen(false);
+                    setOpenPanel(null);
                     ink.selectTool(tool);
                   }
                 }}
@@ -206,7 +208,10 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
               showTooltip
               tooltipText={_('Eraser')}
               Icon={RiEraserLine}
-              onClick={() => ink.setErasing(!ink.erasing)}
+              onClick={() => {
+                setOpenPanel(null);
+                ink.setErasing(!ink.erasing);
+              }}
             />
           </div>
           <AnnotationToolButton
@@ -245,6 +250,24 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
             onClick={handleClose}
           />
         </div>
+      </div>
+      <div ref={areaRef} className='flex min-h-0 flex-1 items-center justify-center'>
+        {size && (
+          <canvas
+            ref={setCanvas}
+            aria-label={_('Note Page')}
+            className='eink-bordered border-base-300/60 border'
+            style={{
+              width: size.width,
+              height: size.height,
+              backgroundColor: PAPER,
+              touchAction: 'none',
+              userSelect: 'none',
+              WebkitUserSelect: 'none',
+              WebkitTouchCallout: 'none',
+            }}
+          />
+        )}
       </div>
     </div>
   );

@@ -5,6 +5,7 @@
  */
 
 import type { InkShape } from './anchor';
+import type { InkNib } from './nibs';
 
 export const DEFAULT_HANDWRITING_COLOR = '#1a1a1a';
 export const DEFAULT_HANDWRITING_WIDTH = 0.006;
@@ -55,6 +56,17 @@ export interface InkStroke {
   width: number;
   /** Set for marker ink; a stroke without it is pen ink. */
   tool?: 'marker';
+  /**
+   * The pen it was drawn with. Absent on ink drawn before notes offered a
+   * choice of pen, and on the reader's own ink, which both read as the
+   * round, pressure-driven default.
+   */
+  nib?: InkNib;
+  /**
+   * How much pressure shaped this stroke, 0..1. Absent means full response,
+   * which is what the engine did before the setting existed.
+   */
+  sensitivity?: number;
   /**
    * CFI range of the text or element a reflowable stroke is bound to. When
    * set, `points` are offsets from that content's box (see anchor.ts).

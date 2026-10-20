@@ -4,13 +4,18 @@ import { HandwritingEditor } from '@/services/handwriting/editor';
 import { HandwritingService } from '@/services/handwriting/handwritingService';
 import { renderStrokes } from '@/services/handwriting/renderer';
 import {
-  DEFAULT_HANDWRITING_COLOR,
-  DEFAULT_HANDWRITING_WIDTH,
   DEFAULT_MARKER_COLOR,
   DEFAULT_MARKER_WIDTH,
   type InkStroke,
   type InkTool,
 } from '@/services/handwriting/model';
+import {
+  DEFAULT_PEN,
+  fractionToMm,
+  mmToFraction,
+  roundThicknessMm,
+  type PenSettings,
+} from '@/services/notes/penSettings';
 import type { PageRect } from '@/services/handwriting/coords';
 import type { QuickNote } from '@/types/notes';
 
@@ -57,8 +62,7 @@ export const useQuickNoteInk = (note: QuickNote) => {
   const rectRef = useRef<PageRect | null>(null);
 
   const [tool, setTool] = useState<InkTool>('pen');
-  const [penColor, setPenColor] = useState(DEFAULT_HANDWRITING_COLOR);
-  const [penWidth, setPenWidth] = useState<number>(DEFAULT_HANDWRITING_WIDTH);
+  const [pen, setPen] = useState<PenSettings>(DEFAULT_PEN);
   const [markerColor, setMarkerColor] = useState(DEFAULT_MARKER_COLOR);
   const [markerWidth, setMarkerWidth] = useState<number>(DEFAULT_MARKER_WIDTH);
   const [erasing, setErasing] = useState(false);
@@ -66,8 +70,10 @@ export const useQuickNoteInk = (note: QuickNote) => {
   const [revision, setRevision] = useState(0);
 
   const marker = tool === 'marker';
-  const color = marker ? markerColor : penColor;
-  const width = marker ? markerWidth : penWidth;
+  const color = marker ? markerColor : pen.color;
+  // The pen is set in millimetres on an A4 page; the engine works in
+  // fractions of the page, which is what survives a change of screen.
+  const width = marker ? markerWidth : mmToFraction(pen.thicknessMm);
 
   // The remembered stylus-only choice, read on the client only: localStorage
   // does not exist while the page is prerendered.
@@ -106,8 +112,17 @@ export const useQuickNoteInk = (note: QuickNote) => {
   // The latest tool settings, readable when the service is built. The canvas
   // and the measured page arrive in either order, so construction cannot rely
   // on an effect having run first.
-  const optionsRef = useRef({ tool, color, widthFraction: width, penOnly });
-  optionsRef.current = { tool, color, widthFraction: width, penOnly };
+  const engineOptions = {
+    tool,
+    color,
+    widthFraction: width,
+    penOnly,
+    nib: pen.nib,
+    sensitivity: pen.sensitivity,
+    stabilization: pen.stabilization,
+  };
+  const optionsRef = useRef(engineOptions);
+  optionsRef.current = engineOptions;
   const erasingRef = useRef(erasing);
   erasingRef.current = erasing;
 
@@ -159,8 +174,16 @@ export const useQuickNoteInk = (note: QuickNote) => {
   );
 
   useEffect(() => {
-    serviceRef.current?.setOptions({ tool, color, widthFraction: width, penOnly });
-  }, [tool, color, width, penOnly]);
+    serviceRef.current?.setOptions({
+      tool,
+      color,
+      widthFraction: width,
+      penOnly,
+      nib: pen.nib,
+      sensitivity: pen.sensitivity,
+      stabilization: pen.stabilization,
+    });
+  }, [tool, color, width, penOnly, pen.nib, pen.sensitivity, pen.stabilization]);
 
   useEffect(() => {
     serviceRef.current?.setEraseMode(erasing);
@@ -171,14 +194,23 @@ export const useQuickNoteInk = (note: QuickNote) => {
     setTool(next);
   }, []);
 
+  /** Changes one or more of the pen's settings, leaving the rest alone. */
+  const updatePen = useCallback(
+    (patch: Partial<PenSettings>) => setPen((current) => ({ ...current, ...patch })),
+    [],
+  );
+
   const selectColor = useCallback(
-    (next: string) => (marker ? setMarkerColor(next) : setPenColor(next)),
-    [marker],
+    (next: string) => (marker ? setMarkerColor(next) : updatePen({ color: next })),
+    [marker, updatePen],
   );
 
   const selectWidth = useCallback(
-    (next: number) => (marker ? setMarkerWidth(next) : setPenWidth(next)),
-    [marker],
+    (next: number) =>
+      marker
+        ? setMarkerWidth(next)
+        : updatePen({ thicknessMm: roundThicknessMm(fractionToMm(next)) }),
+    [marker, updatePen],
   );
 
   const setPenOnly = useCallback((next: boolean) => {
@@ -198,6 +230,8 @@ export const useQuickNoteInk = (note: QuickNote) => {
     width,
     selectColor,
     selectWidth,
+    pen,
+    updatePen,
     erasing,
     setErasing,
     penOnly,
