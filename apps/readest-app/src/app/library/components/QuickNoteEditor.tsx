@@ -1,8 +1,11 @@
 import clsx from 'clsx';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { MdAdd } from 'react-icons/md';
 import {
   RiArrowGoBackLine,
   RiArrowGoForwardLine,
+  RiArrowLeftSLine,
+  RiArrowRightSLine,
   RiCloseLine,
   RiEraserLine,
   RiMarkPenLine,
@@ -20,23 +23,21 @@ import { QUICK_NOTE_ASPECT, type QuickNote } from '@/types/notes';
 import AnnotationToolButton from '@/app/reader/components/annotator/AnnotationToolButton';
 import HandwritingOptions from '@/app/reader/components/handwriting/HandwritingOptions';
 import { useQuickNoteInk } from '../hooks/useQuickNoteInk';
-
-/**
- * The page is paper, not a themed surface: stored ink keeps the colour it was
- * drawn with, so a dark page would hide black ink in dark mode and on e-ink.
- */
-const PAPER = '#fdfdfb';
+import NotePage from './NotePage';
 
 const TOOLS: { tool: InkTool; label: string; Icon: IconType }[] = [
   { tool: 'pen', label: 'Pen', Icon: RiPencilLine },
   { tool: 'marker', label: 'Marker', Icon: RiMarkPenLine },
 ];
 
-/** The largest page of note aspect that fits inside `box`. */
-const fitPage = (box: DOMRect) => {
-  const width = Math.min(box.width, box.height * QUICK_NOTE_ASPECT);
-  return { width, height: width / QUICK_NOTE_ASPECT };
-};
+/** Gap between pages, and the padding around the stack, in CSS px. */
+const PAGE_GAP = 16;
+/** A page never grows past this, so it stays readable on a wide screen. */
+const MAX_PAGE_WIDTH = 900;
+
+const ZOOM_STEP = 1.25;
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 3;
 
 interface QuickNoteEditorProps {
   note: QuickNote;
@@ -46,29 +47,37 @@ interface QuickNoteEditorProps {
 }
 
 /**
- * Full-screen editor for one standalone handwritten note: a blank page, the
- * reader's ink engine, and a dock of drawing tools. Drawn with a stylus
- * (pressure included), a finger, or a mouse; "Stylus only" rejects the hand
- * entirely so a tablet can be written on with the palm resting on the glass.
+ * Full-screen editor for one standalone handwritten note: a stack of pages to
+ * write on and a dock of drawing tools. Drawn with a stylus (pressure
+ * included), a finger, or a mouse; "Stylus only" rejects the hand entirely, so
+ * a tablet can be written on with the palm resting on the glass — and, because
+ * touch is then not input, scrolled with that same hand.
  */
 const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onClose }) => {
   const _ = useTranslation();
   const { safeAreaInsets } = useThemeStore();
-  const areaRef = useRef<HTMLDivElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
+  const [surfaceWidth, setSurfaceWidth] = useState(0);
+  const [zoom, setZoom] = useState(1);
+  const [currentPage, setCurrentPage] = useState(0);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const ink = useQuickNoteInk(note);
-  const { attachCanvas, setPageRect, strokes } = ink;
+  const { attachSurface, attachLiveCanvas, setSurfaceRect, registerPage, strokes } = ink;
 
-  // How big the page can be, from the space left above the dock. Re-measured
-  // on resize and rotation; the ink follows because it is stored normalized.
+  const pageWidth = Math.max(1, Math.min(surfaceWidth - PAGE_GAP * 2, MAX_PAGE_WIDTH) * zoom);
+  const pageHeight = pageWidth / QUICK_NOTE_ASPECT;
+
+  // The surface's own bounds, which the pointer backend maps touches through,
+  // and its width, which decides how big a page can be. Pages are positioned
+  // from the DOM as each stroke lands, so scrolling needs no measuring.
   useEffect(() => {
-    const el = areaRef.current;
+    const el = surfaceRef.current;
     if (!el) return;
     const measure = () => {
-      const next = fitPage(el.getBoundingClientRect());
-      if (next.width > 0 && next.height > 0) setSize(next);
+      const box = el.getBoundingClientRect();
+      if (box.width <= 0 || box.height <= 0) return;
+      setSurfaceWidth(box.width);
+      setSurfaceRect({ left: box.left, top: box.top, width: box.width, height: box.height });
     };
     measure();
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
@@ -78,30 +87,54 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
       observer?.disconnect();
       window.removeEventListener('resize', measure);
     };
+  }, [setSurfaceRect]);
+
+  // Which page the reader is looking at, for the indicator and the page
+  // buttons. Measured from the page nearest the middle of the surface.
+  const handleScroll = useCallback(() => {
+    const el = surfaceRef.current;
+    if (!el) return;
+    const middle = el.getBoundingClientRect().top + el.clientHeight / 2;
+    const pages = el.querySelectorAll('[data-page]');
+    let nearest = 0;
+    let best = Infinity;
+    pages.forEach((page, index) => {
+      const box = page.getBoundingClientRect();
+      const distance = Math.abs(box.top + box.height / 2 - middle);
+      if (distance < best) {
+        best = distance;
+        nearest = index;
+      }
+    });
+    setCurrentPage(nearest);
   }, []);
 
-  // Where that page actually landed on screen. Measured from the canvas after
-  // it is laid out, since the pointer backend maps clientX/clientY through it.
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !size) return;
-    const box = canvas.getBoundingClientRect();
-    setPageRect({ left: box.left, top: box.top, width: box.width, height: box.height });
-  }, [size, setPageRect]);
-
-  const setCanvas = useCallback(
-    (el: HTMLCanvasElement | null) => {
-      canvasRef.current = el;
-      attachCanvas(el);
+  const goToPage = useCallback(
+    (index: number) => {
+      const el = surfaceRef.current;
+      const target = el?.querySelectorAll('[data-page]')[index];
+      if (!el || !target) return;
+      // Scroll the surface itself rather than scrollIntoView, which would also
+      // scroll whatever is behind this full-screen editor.
+      el.scrollTop += target.getBoundingClientRect().top - el.getBoundingClientRect().top;
+      setCurrentPage(index);
     },
-    [attachCanvas],
+    [],
+  );
+
+  const setSurface = useCallback(
+    (el: HTMLDivElement | null) => {
+      surfaceRef.current = el;
+      attachSurface(el);
+    },
+    [attachSurface],
   );
 
   // Closing saves too: handwriting is too easy to lose to make Save the only
   // way out. A note scribbled by accident is removed from the notes list.
   const persist = useCallback(
-    () => onPersist({ ...note, ink: strokes(), updatedAt: Date.now() }),
-    [note, onPersist, strokes],
+    () => onPersist({ ...note, pages: ink.pageCount, ink: strokes(), updatedAt: Date.now() }),
+    [ink.pageCount, note, onPersist, strokes],
   );
 
   const handleSave = useCallback(() => {
@@ -118,12 +151,30 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
     onClose();
   }, [onClose, persist]);
 
+  // Show a newly added page rather than leaving it below the fold. The scroll
+  // waits for the page to exist in the DOM, which is after the render that
+  // adds it, not the click that asked for it.
+  const pendingScroll = useRef<number | null>(null);
+  const handleAddPage = useCallback(() => {
+    pendingScroll.current = ink.pageCount;
+    ink.addPage();
+  }, [ink]);
+
+  useEffect(() => {
+    const target = pendingScroll.current;
+    if (target === null) return;
+    pendingScroll.current = null;
+    goToPage(target);
+  }, [ink.pageCount, goToPage]);
+
   const choose =
     <T,>(select: (value: T) => void) =>
     (value: T) => {
       select(value);
       setOptionsOpen(false);
     };
+
+  const pages = Array.from({ length: ink.pageCount }, (_unused, index) => index);
 
   return (
     <div
@@ -132,28 +183,44 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
       className='bg-base-200 fixed inset-0 z-50 flex flex-col'
       style={{ paddingTop: `${safeAreaInsets?.top ?? 0}px` }}
     >
-      <div ref={areaRef} className='flex min-h-0 flex-1 items-center justify-center'>
-        {size && (
-          <canvas
-            ref={setCanvas}
-            aria-label={_('Note Page')}
-            className='eink-bordered border-base-300/60 border'
-            style={{
-              width: size.width,
-              height: size.height,
-              backgroundColor: PAPER,
-              touchAction: 'none',
-              userSelect: 'none',
-              WebkitUserSelect: 'none',
-              WebkitTouchCallout: 'none',
-            }}
-          />
-        )}
+      <div className='relative min-h-0 flex-1'>
+        <div
+          ref={setSurface}
+          onScroll={handleScroll}
+          className='h-full overflow-auto'
+          style={{
+            // With touch rejected as input the hand is free to scroll; while a
+            // finger can draw, the browser must not steal the gesture.
+            touchAction: ink.penOnly ? 'pan-x pan-y' : 'none',
+            userSelect: 'none',
+            WebkitUserSelect: 'none',
+            WebkitTouchCallout: 'none',
+          }}
+        >
+          <div
+            className='flex w-max min-w-full flex-col items-center'
+            style={{ gap: PAGE_GAP, padding: PAGE_GAP }}
+          >
+            {pages.map((index) => (
+              <NotePage
+                key={index}
+                index={index}
+                strokes={ink.strokesOfPage(index)}
+                width={pageWidth}
+                height={pageHeight}
+                pageRef={registerPage(index)}
+                revision={ink.revision}
+              />
+            ))}
+          </div>
+        </div>
+        {/* The stroke still under the pen, drawn over the pages it crosses. */}
+        <canvas ref={attachLiveCanvas} className='pointer-events-none absolute inset-0 z-10' />
       </div>
       <div
         className={clsx(
-          'eink-bordered bg-base-100 border-base-300/50 relative z-10 flex items-center',
-          'box-content h-13 justify-between border-t px-3',
+          'eink-bordered bg-base-100 border-base-300/50 relative z-20 flex items-center',
+          'no-scrollbar box-content h-13 gap-2 overflow-x-auto border-t px-3',
         )}
         style={{ paddingBottom: `${(safeAreaInsets?.bottom ?? 0) / 3}px` }}
       >
@@ -168,7 +235,7 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
             />
           </div>
         )}
-        <div className='flex items-center gap-2'>
+        <div className='flex shrink-0 items-center gap-2'>
           {TOOLS.map(({ tool, label, Icon }) => {
             const active = !ink.erasing && ink.tool === tool;
             return (
@@ -222,8 +289,85 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
             onClick={ink.redo}
           />
         </div>
-        <div className='flex items-center gap-2'>
-          {/* Palm rejection: with this on, only a stylus draws. */}
+
+        <div className='bg-base-content/15 h-6 w-px shrink-0' />
+
+        {/* Pages: move between them, and add one at the end. The chevrons are
+            rotated a quarter turn because the pages stack downwards. */}
+        <div className='flex shrink-0 items-center gap-1'>
+          <button
+            type='button'
+            aria-label={_('Previous Page')}
+            disabled={currentPage === 0}
+            onClick={() => goToPage(currentPage - 1)}
+            className={clsx(
+              'flex h-8 min-h-8 w-8 items-center justify-center rounded-md p-0',
+              currentPage === 0 ? 'cursor-not-allowed opacity-40' : 'not-eink:hover:bg-base-200',
+            )}
+          >
+            <RiArrowLeftSLine className='rotate-90' />
+          </button>
+          <span className='text-base-content/70 shrink-0 whitespace-nowrap text-xs tabular-nums'>
+            {currentPage + 1} / {ink.pageCount}
+          </span>
+          <button
+            type='button'
+            aria-label={_('Next Page')}
+            disabled={currentPage >= ink.pageCount - 1}
+            onClick={() => goToPage(currentPage + 1)}
+            className={clsx(
+              'flex h-8 min-h-8 w-8 items-center justify-center rounded-md p-0',
+              currentPage >= ink.pageCount - 1
+                ? 'cursor-not-allowed opacity-40'
+                : 'not-eink:hover:bg-base-200',
+            )}
+          >
+            <RiArrowRightSLine className='rotate-90' />
+          </button>
+          <AnnotationToolButton
+            showTooltip
+            tooltipText={_('Add Page')}
+            Icon={MdAdd}
+            onClick={handleAddPage}
+          />
+        </div>
+
+        <div className='bg-base-content/15 h-6 w-px shrink-0' />
+
+        {/* Zoom, as plain glyphs so the dock carries no icon for it. */}
+        <div className='flex shrink-0 items-center gap-1'>
+          <button
+            type='button'
+            aria-label={_('Zoom Out')}
+            disabled={zoom <= MIN_ZOOM}
+            onClick={() => setZoom((value) => Math.max(MIN_ZOOM, value / ZOOM_STEP))}
+            className={clsx(
+              'flex h-8 min-h-8 w-8 items-center justify-center rounded-md p-0 text-base leading-none',
+              zoom <= MIN_ZOOM ? 'cursor-not-allowed opacity-40' : 'not-eink:hover:bg-base-200',
+            )}
+          >
+            −
+          </button>
+          <span className='text-base-content/70 w-10 shrink-0 text-center text-xs tabular-nums'>
+            {Math.round(zoom * 100)}%
+          </span>
+          <button
+            type='button'
+            aria-label={_('Zoom In')}
+            disabled={zoom >= MAX_ZOOM}
+            onClick={() => setZoom((value) => Math.min(MAX_ZOOM, value * ZOOM_STEP))}
+            className={clsx(
+              'flex h-8 min-h-8 w-8 items-center justify-center rounded-md p-0 text-base leading-none',
+              zoom >= MAX_ZOOM ? 'cursor-not-allowed opacity-40' : 'not-eink:hover:bg-base-200',
+            )}
+          >
+            +
+          </button>
+        </div>
+
+        <div className='ms-auto flex shrink-0 items-center gap-2'>
+          {/* Palm rejection: with this on, only a stylus draws — and a finger
+              scrolls instead. */}
           <div className={clsx('rounded-md', ink.penOnly && 'bg-base-300 eink:border')}>
             <AnnotationToolButton
               showTooltip

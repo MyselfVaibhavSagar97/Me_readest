@@ -15,5 +15,12 @@ export interface QuickNote {
   title: string;
   createdAt: number;
   updatedAt: number;
+  /**
+   * How many pages the note has. Absent on notes written before notes had
+   * more than one, which read as a single page; a page is kept even when it
+   * is blank, so adding one and writing on the next still leaves it there.
+   */
+  pages?: number;
+  /** Every stroke in the note; `page` says which page it sits on. */
   ink: InkStroke[];
 }

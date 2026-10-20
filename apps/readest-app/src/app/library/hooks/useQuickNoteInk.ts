@@ -4,6 +4,13 @@ import { HandwritingEditor } from '@/services/handwriting/editor';
 import { HandwritingService } from '@/services/handwriting/handwritingService';
 import { renderStrokes } from '@/services/handwriting/renderer';
 import {
+  nearestPageIndex,
+  notePageKey,
+  pageCountOf,
+  pagesFromNote,
+  strokesForNote,
+} from '@/services/notes/notePages';
+import {
   DEFAULT_HANDWRITING_COLOR,
   DEFAULT_HANDWRITING_WIDTH,
   DEFAULT_MARKER_COLOR,
@@ -13,12 +20,6 @@ import {
 } from '@/services/handwriting/model';
 import type { PageRect } from '@/services/handwriting/coords';
 import type { QuickNote } from '@/types/notes';
-
-/**
- * A quick note is one blank page, so the editor only ever has this one page
- * key — there is no book, section or spine position behind it.
- */
-const PAGE = 'note';
 
 const PEN_ONLY_KEY = 'quickNotePenOnly';
 
@@ -39,22 +40,30 @@ const writePenOnly = (penOnly: boolean) => {
   }
 };
 
+const rectOf = (el: Element): PageRect => {
+  const box = el.getBoundingClientRect();
+  return { left: box.left, top: box.top, width: box.width, height: box.height };
+};
+
 /**
- * Drawing for one standalone note. Wraps the same ink engine the reader uses
- * (HandwritingService over HandwritingEditor), with no anchoring or paging:
- * strokes are normalized to the note's page and nothing else.
+ * Drawing for one standalone note, across its pages.
  *
- * The canvas is painted imperatively from the service's render callback, so a
- * stroke in progress never re-renders React; only committed changes (a
- * finished stroke, an erase, undo, redo) bump `revision` for the toolbar.
+ * The pages scroll as one surface, so input is taken from that whole surface
+ * and each finished stroke is routed to the page it was drawn over — the same
+ * arrangement the reader uses for a scrolled book. Committed ink is painted by
+ * each page onto its own canvas; only the stroke still under the pen goes on
+ * an overlay, so a page repaints when its ink changes rather than on every
+ * pointer frame.
  */
 export const useQuickNoteInk = (note: QuickNote) => {
-  const [editor] = useState(
-    () => new HandwritingEditor({ [PAGE]: { strokes: note.ink, updatedAt: note.updatedAt } }),
-  );
+  const [editor] = useState(() => new HandwritingEditor(pagesFromNote(note)));
+  const [pageCount, setPageCount] = useState(() => pageCountOf(note));
   const serviceRef = useRef<HandwritingService | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const rectRef = useRef<PageRect | null>(null);
+  const surfaceRef = useRef<HTMLElement | null>(null);
+  const surfaceRectRef = useRef<PageRect | null>(null);
+  const liveCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  /** The page elements, so a stroke can be placed against where they are now. */
+  const pageEls = useRef<(HTMLElement | null)[]>([]);
 
   const [tool, setTool] = useState<InkTool>('pen');
   const [penColor, setPenColor] = useState(DEFAULT_HANDWRITING_COLOR);
@@ -73,9 +82,10 @@ export const useQuickNoteInk = (note: QuickNote) => {
   // does not exist while the page is prerendered.
   useEffect(() => setPenOnlyState(readPenOnly()), []);
 
-  const paint = useCallback(() => {
-    const canvas = canvasRef.current;
-    const rect = rectRef.current;
+  /** Repaints the in-progress stroke; committed ink belongs to the pages. */
+  const paintLive = useCallback(() => {
+    const canvas = liveCanvasRef.current;
+    const rect = surfaceRectRef.current;
     const service = serviceRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx || !rect || !service) return;
@@ -87,8 +97,9 @@ export const useQuickNoteInk = (note: QuickNote) => {
       canvas.height = pxHeight;
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    // The canvas *is* the page, so ink draws from its own origin.
-    renderStrokes(ctx, service.strokesForRender(), {
+    // Live points are normalized to the input surface, which is what this
+    // canvas covers, so they draw from its own origin.
+    renderStrokes(ctx, serviceRef.current!.liveStrokes(), {
       left: 0,
       top: 0,
       width: rect.width,
@@ -103,51 +114,65 @@ export const useQuickNoteInk = (note: QuickNote) => {
     };
   }, [editor]);
 
-  // The latest tool settings, readable when the service is built. The canvas
-  // and the measured page arrive in either order, so construction cannot rely
-  // on an effect having run first.
   const optionsRef = useRef({ tool, color, widthFraction: width, penOnly });
   optionsRef.current = { tool, color, widthFraction: width, penOnly };
   const erasingRef = useRef(erasing);
   erasingRef.current = erasing;
 
-  /** Builds the drawing session once both the canvas and the page are known. */
+  /** Sends a stroke to the page it was drawn over, re-normalized to it. */
+  const route = useCallback((windowPoints: readonly (readonly number[])[]) => {
+    if (!windowPoints.length) return null;
+    const xs = windowPoints.map((p) => p[0]!);
+    const ys = windowPoints.map((p) => p[1]!);
+    const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+    const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+
+    // Measured fresh on every stroke, so scrolling and zooming need no
+    // bookkeeping: where the pages are now is where the ink lands.
+    const rects = pageEls.current.map((el) => (el ? rectOf(el) : null));
+    const index = nearestPageIndex(rects, cx, cy);
+    const rect = index === null ? null : rects[index];
+    if (index === null || !rect) return null;
+    return { page: notePageKey(index), rect, anchoring: null };
+  }, []);
+
   const ensureAttached = useCallback(() => {
-    const el = canvasRef.current;
-    const rect = rectRef.current;
+    const el = surfaceRef.current;
+    const rect = surfaceRectRef.current;
     if (!el || !rect || serviceRef.current) return;
-    const service = new HandwritingService(editor, PAGE, rect);
-    service.onNeedsRender(paint);
+    const service = new HandwritingService(editor, notePageKey(0), rect);
+    service.onNeedsRender(paintLive);
     // setOptions (rather than constructor options) also derives the eraser
     // radius from the pen width, so the eraser always matches the tool.
     service.setOptions(optionsRef.current);
     service.setEraseMode(erasingRef.current);
+    service.setRouter(route);
     serviceRef.current = service;
-    void service.attach(el).then(paint);
-  }, [editor, paint]);
+    void service.attach(el).then(paintLive);
+  }, [editor, paintLive, route]);
 
   /**
-   * The page's bounds in viewport coordinates: the pointer backend maps
-   * clientX/clientY through them, so they must be where the page actually is
-   * on screen, not where it sits inside its container.
+   * The input surface's bounds in viewport coordinates: the pointer backend
+   * maps clientX/clientY through them. Page positions are read from the DOM
+   * as each stroke lands, so scrolling needs no bookkeeping here.
    */
-  const setPageRect = useCallback(
+  const setSurfaceRect = useCallback(
     (rect: PageRect) => {
-      rectRef.current = rect;
+      surfaceRectRef.current = rect;
       if (serviceRef.current) {
         serviceRef.current.updateRect(rect);
-        paint();
+        paintLive();
       } else {
         ensureAttached();
       }
     },
-    [ensureAttached, paint],
+    [ensureAttached, paintLive],
   );
 
-  /** Canvas callback ref: the ink engine attaches here and leaves on unmount. */
-  const attachCanvas = useCallback(
-    (el: HTMLCanvasElement | null) => {
-      canvasRef.current = el;
+  /** Ref callback for the scrolling element that takes pen input. */
+  const attachSurface = useCallback(
+    (el: HTMLElement | null) => {
+      surfaceRef.current = el;
       if (!el) {
         void serviceRef.current?.detach();
         serviceRef.current = null;
@@ -156,6 +181,22 @@ export const useQuickNoteInk = (note: QuickNote) => {
       ensureAttached();
     },
     [ensureAttached],
+  );
+
+  const attachLiveCanvas = useCallback(
+    (el: HTMLCanvasElement | null) => {
+      liveCanvasRef.current = el;
+      paintLive();
+    },
+    [paintLive],
+  );
+
+  /** Ref callback for one page, so strokes can be placed against it. */
+  const registerPage = useCallback(
+    (index: number) => (el: HTMLElement | null) => {
+      pageEls.current[index] = el;
+    },
+    [],
   );
 
   useEffect(() => {
@@ -186,12 +227,28 @@ export const useQuickNoteInk = (note: QuickNote) => {
     writePenOnly(next);
   }, []);
 
-  /** The note's ink as it should be stored. */
-  const strokes = useCallback((): InkStroke[] => [...editor.strokes(PAGE)], [editor]);
+  const addPage = useCallback(() => setPageCount((count) => count + 1), []);
+
+  /** The committed ink on one page, for that page to paint. */
+  const strokesOfPage = useCallback(
+    (index: number): readonly InkStroke[] => editor.strokes(notePageKey(index)),
+    [editor],
+  );
+
+  /** The note's ink as it should be stored, each stroke carrying its page. */
+  const strokes = useCallback(
+    () => strokesForNote((key) => editor.strokes(key), pageCount),
+    [editor, pageCount],
+  );
 
   return {
-    attachCanvas,
-    setPageRect,
+    attachSurface,
+    attachLiveCanvas,
+    registerPage,
+    setSurfaceRect,
+    pageCount,
+    addPage,
+    strokesOfPage,
     tool,
     selectTool,
     color,
@@ -205,8 +262,7 @@ export const useQuickNoteInk = (note: QuickNote) => {
     undo: useCallback(() => serviceRef.current?.undo(), []),
     redo: useCallback(() => serviceRef.current?.redo(), []),
     strokes,
-    /** Bumped on every committed change, so the toolbar can follow the ink. */
+    /** Bumped on every committed change, so the pages repaint. */
     revision,
-    hasInk: editor.strokes(PAGE).length > 0,
   };
 };

@@ -76,6 +76,10 @@ export class PointerHandwritingBackend {
    * Pointer events still arrive.
    */
   private claimTouch = (e: Event) => {
+    // With touch rejected as input there is nothing to protect from the
+    // browser's gestures, and the hand should stay free to scroll or zoom the
+    // view it is drawing on.
+    if (this.penOnly) return;
     if (e.cancelable) e.preventDefault();
   };
 
