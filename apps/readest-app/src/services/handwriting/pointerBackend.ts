@@ -23,6 +23,8 @@ export class PointerHandwritingBackend {
   /** Pointer type owning the active slot, so a pen can displace a palm touch. */
   private activePointerType: string | null = null;
   private erasing = false;
+  /** Strict palm rejection: only a pen draws (see setPenOnly). */
+  private penOnly = false;
 
   attach(el: HTMLElement, toPage: (x: number, y: number) => InkPoint) {
     this.detach();
@@ -55,6 +57,18 @@ export class PointerHandwritingBackend {
   }
 
   /**
+   * Strict palm rejection, for writing with a stylus on a surface held in the
+   * hand. The default rules below let a pen displace a palm, but a palm that
+   * lands while the pen is still in the air has nothing to displace it and
+   * draws a mark of its own. With this set, touch is never input: only a pen
+   * (or a mouse, which is not a hand) draws. Off by default, so a device with
+   * no stylus still draws with a finger.
+   */
+  setPenOnly(penOnly: boolean) {
+    this.penOnly = penOnly;
+  }
+
+  /**
    * Takes the touch sequence from the browser. `touch-action: none` only
    * stops panning and zooming: iOS WebKit still reads a quick tap followed by
    * a drag as its own double-tap or text-selection gesture and withholds that
@@ -74,6 +88,10 @@ export class PointerHandwritingBackend {
   private onDown = (e: PointerEvent) => {
     if (!this.toPage) return;
     const isTouch = e.pointerType === 'touch';
+
+    // Strict palm rejection drops touch before it can claim the slot below,
+    // so a pen arriving later still draws.
+    if (isTouch && this.penOnly) return;
 
     // Palm rejection. A resting hand reaches the digitizer before the pen
     // does, so the touch has to give way when a pen arrives — otherwise the

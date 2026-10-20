@@ -114,6 +114,64 @@ describe('PointerHandwritingBackend palm rejection', () => {
   });
 });
 
+describe('PointerHandwritingBackend stylus-only palm rejection', () => {
+  const setup = () => {
+    const el = new FakeElement();
+    const backend = new PointerHandwritingBackend();
+    const points: InkPoint[] = [];
+    backend.onBatch((batch) => points.push(...batch));
+    backend.attach(el as unknown as HTMLElement, identity);
+    return { el, backend, points };
+  };
+
+  it('ignores a finger outright, so a hand resting on the page leaves no mark', () => {
+    const { el, backend, points } = setup();
+    backend.setPenOnly(true);
+
+    // No pen in this sequence at all: the default palm rejection would commit
+    // this as a stroke, because a lone touch is the only pointer down.
+    dispatch(el, 'pointerdown', { pointerId: 9, pointerType: 'touch', clientX: 70, clientY: 70 });
+    dispatch(el, 'pointermove', { pointerId: 9, pointerType: 'touch', clientX: 72, clientY: 71 });
+    dispatch(el, 'pointerup', { pointerId: 9, pointerType: 'touch' });
+
+    expect(points).toEqual([]);
+  });
+
+  it('takes the pen while a palm is already resting on the screen', () => {
+    const { el, backend, points } = setup();
+    backend.setPenOnly(true);
+
+    // The rejected palm must not hold the active-pointer slot, or the pen
+    // stroke that follows would be dropped as a second contact.
+    dispatch(el, 'pointerdown', { pointerId: 9, pointerType: 'touch', clientX: 70, clientY: 70 });
+    dispatch(el, 'pointerdown', { pointerId: 1, pointerType: 'pen', clientX: 10, clientY: 10 });
+    dispatch(el, 'pointerup', { pointerId: 1, pointerType: 'pen' });
+
+    expect(points.map((p) => p.slice(0, 2))).toEqual([[10, 10]]);
+  });
+
+  it('draws with a finger again once stylus-only is turned off', () => {
+    const { el, backend, points } = setup();
+    backend.setPenOnly(true);
+    backend.setPenOnly(false);
+
+    dispatch(el, 'pointerdown', { pointerId: 9, pointerType: 'touch', clientX: 30, clientY: 40 });
+    dispatch(el, 'pointerup', { pointerId: 9, pointerType: 'touch' });
+
+    expect(points.map((p) => p.slice(0, 2))).toEqual([[30, 40]]);
+  });
+
+  it('leaves a mouse alone: stylus-only rejects touch, not other devices', () => {
+    const { el, backend, points } = setup();
+    backend.setPenOnly(true);
+
+    dispatch(el, 'pointerdown', { pointerId: 2, pointerType: 'mouse', clientX: 5, clientY: 6 });
+    dispatch(el, 'pointerup', { pointerId: 2, pointerType: 'mouse' });
+
+    expect(points.map((p) => p.slice(0, 2))).toEqual([[5, 6]]);
+  });
+});
+
 describe('PointerHandwritingBackend', () => {
   it('batches a move on the next animation frame, not per event', async () => {
     const el = new FakeElement();
