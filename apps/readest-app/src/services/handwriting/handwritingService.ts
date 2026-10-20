@@ -10,6 +10,8 @@ import {
   type InkTool,
 } from './model';
 import { screenToPage, type PageRect } from './coords';
+import { DEFAULT_NIB, type InkNib } from './nibs';
+import { StrokeStabilizer } from './stabilizer';
 import type { InkAnchoring } from './anchor';
 
 /** Where a stroke drawn over a scrolled view belongs. */
@@ -31,7 +33,20 @@ export interface HandwritingOptions {
   eraseRadiusFraction: number;
   /** Strict palm rejection: only a stylus draws (PointerHandwritingBackend). */
   penOnly: boolean;
+  /** The pen shape new strokes are drawn with. */
+  nib: InkNib;
+  /** 0..1; how much pressure changes a stroke's width. */
+  sensitivity: number;
+  /** 0..1; how much an incoming stroke is smoothed as it is drawn. */
+  stabilization: number;
 }
+
+/**
+ * Full pressure response, which is what the engine did before the pen panel
+ * could change it. A stroke drawn at this setting stores no sensitivity, so
+ * the reader's ink keeps exactly the shape it has always had.
+ */
+const DEFAULT_SENSITIVITY = 1;
 
 const DEFAULT_OPTIONS: HandwritingOptions = {
   tool: 'pen',
@@ -39,6 +54,9 @@ const DEFAULT_OPTIONS: HandwritingOptions = {
   widthFraction: DEFAULT_HANDWRITING_WIDTH,
   eraseRadiusFraction: 0.012,
   penOnly: false,
+  nib: DEFAULT_NIB,
+  sensitivity: DEFAULT_SENSITIVITY,
+  stabilization: 0,
 };
 
 /**
@@ -98,6 +116,7 @@ export class HandwritingService {
   private boox = new BooxHandwritingBackend();
   private live: InkPoint[] = [];
   private liveErase = false;
+  private stabilizer = new StrokeStabilizer();
   /** Last eraser sample, so consecutive batches erase along a connected path. */
   private eraseTail: InkPoint | null = null;
   private rect: PageRect;
@@ -131,6 +150,7 @@ export class HandwritingService {
       color: this.options.color,
       width: this.options.widthFraction,
       ...this.toolField(),
+      ...this.nibFields(),
       points: this.live,
     };
   }
@@ -138,6 +158,21 @@ export class HandwritingService {
   /** Marker ink says so; pen ink stays as it always was stored. */
   private toolField() {
     return this.options.tool === 'marker' ? { tool: 'marker' as const } : {};
+  }
+
+  /**
+   * The pen a stroke was drawn with, written only when it differs from what
+   * the renderer already assumes. A caller that never touches these settings
+   * — the reader — therefore stores exactly the ink it always did.
+   */
+  private nibFields() {
+    if (this.options.tool === 'marker') return {};
+    return {
+      ...(this.options.nib === DEFAULT_NIB ? {} : { nib: this.options.nib }),
+      ...(this.options.sensitivity === DEFAULT_SENSITIVITY
+        ? {}
+        : { sensitivity: this.options.sensitivity }),
+    };
   }
 
   /** Strokes to render right now, including the in-progress live stroke. */
@@ -180,6 +215,7 @@ export class HandwritingService {
       ),
     };
     this.pointer.setPenOnly(this.options.penOnly);
+    this.stabilizer.setStrength(this.options.stabilization);
     this.restartBoox();
     this.onRender?.();
   }
@@ -366,10 +402,12 @@ export class HandwritingService {
       }
       this.eraseTail = kind === 'end' ? null : (path[path.length - 1] ?? null);
       this.live = [];
+      // The eraser follows the hand exactly; only drawing is smoothed.
+      this.stabilizer.reset();
       this.onRender?.();
       return;
     }
-    this.live.push(...points);
+    for (const point of points) this.live.push(this.stabilizer.push(point));
     if (kind === 'end' && this.live.length) {
       const target = this.targetOf(simplifyPoints(this.live));
       // Undo and redo follow the page last drawn on.
@@ -380,11 +418,14 @@ export class HandwritingService {
         color: this.options.color,
         width: this.options.widthFraction * target.scale,
         ...this.toolField(),
+        ...this.nibFields(),
         ...(this.session ? { session: this.session } : {}),
         ...pinned,
         points: roundPoints(pinned?.points ?? target.points),
       });
       this.live = [];
+      // The next stroke starts from the pen, not from where this one ended.
+      this.stabilizer.reset();
     }
     this.onRender?.();
   }
