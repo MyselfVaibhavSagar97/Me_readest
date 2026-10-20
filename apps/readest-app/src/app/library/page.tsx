@@ -1,6 +1,7 @@
 'use client';
 
 import BookshelvesDialog from './components/BookshelvesDialog';
+import QuickNotes from './components/QuickNotes';
 
 import clsx from 'clsx';
 import * as React from 'react';
@@ -2089,6 +2090,7 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
         />
       )}
       <NowPlayingBar isSelectMode={isSelectMode} />
+      {!isSelectMode && <QuickNotes />}
       {showDetailsBook && (
         <BookDetailModal
           isOpen={!!showDetailsBook}

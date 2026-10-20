@@ -42,7 +42,12 @@ import {
   loadFeeds as loadFeedsFromDisk,
   saveFeeds as saveFeedsToDisk,
 } from '@/services/rss/feedPersistence';
+import {
+  loadQuickNotes as loadQuickNotesFromDisk,
+  saveQuickNotes as saveQuickNotesToDisk,
+} from '@/services/notes/quickNotePersistence';
 import type { RssFeed } from '@/types/rss';
+import type { QuickNote } from '@/types/notes';
 
 export abstract class BaseAppService implements AppService {
   osPlatform: OsPlatform = getOSPlatform();
@@ -643,6 +648,14 @@ export abstract class BaseAppService implements AppService {
 
   async saveFeeds(feeds: RssFeed[]): Promise<void> {
     return saveFeedsToDisk(this.fs, feeds);
+  }
+
+  async loadQuickNotes(): Promise<QuickNote[]> {
+    return loadQuickNotesFromDisk(this.fs);
+  }
+
+  async saveQuickNotes(notes: QuickNote[]): Promise<void> {
+    return saveQuickNotesToDisk(this.fs, notes);
   }
 
   async loadLibraryBooks(): Promise<Book[]> {

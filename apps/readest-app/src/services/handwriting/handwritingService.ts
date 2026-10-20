@@ -29,6 +29,8 @@ export interface HandwritingOptions {
   color: string;
   widthFraction: number; // pen width as a fraction of page width
   eraseRadiusFraction: number;
+  /** Strict palm rejection: only a stylus draws (PointerHandwritingBackend). */
+  penOnly: boolean;
 }
 
 const DEFAULT_OPTIONS: HandwritingOptions = {
@@ -36,6 +38,7 @@ const DEFAULT_OPTIONS: HandwritingOptions = {
   color: DEFAULT_HANDWRITING_COLOR,
   widthFraction: DEFAULT_HANDWRITING_WIDTH,
   eraseRadiusFraction: 0.012,
+  penOnly: false,
 };
 
 /**
@@ -176,6 +179,7 @@ export class HandwritingService {
         DEFAULT_OPTIONS.eraseRadiusFraction,
       ),
     };
+    this.pointer.setPenOnly(this.options.penOnly);
     this.restartBoox();
     this.onRender?.();
   }
@@ -291,6 +295,7 @@ export class HandwritingService {
       );
     } else if (this.backend === 'pointer') {
       this.pointer.onBatch((points, kind, erase) => this.onBatch(points, kind, erase));
+      this.pointer.setPenOnly(this.options.penOnly);
       this.pointer.attach(el, toPage);
     }
   }
