@@ -130,6 +130,45 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
     [attachSurface],
   );
 
+  // Scrolling by hand, while the pen writes. Only runs with Stylus only on,
+  // which is exactly when the ink engine ignores touch, so a finger has
+  // nothing else to do and the two can never fight over the same contact.
+  useEffect(() => {
+    const el = surfaceRef.current;
+    if (!el || !ink.penOnly) return;
+    let active: number | null = null;
+    let lastX = 0;
+    let lastY = 0;
+
+    const onDown = (event: PointerEvent) => {
+      if (event.pointerType !== 'touch' || active !== null) return;
+      active = event.pointerId;
+      lastX = event.clientX;
+      lastY = event.clientY;
+    };
+    const onMove = (event: PointerEvent) => {
+      if (event.pointerId !== active) return;
+      el.scrollLeft -= event.clientX - lastX;
+      el.scrollTop -= event.clientY - lastY;
+      lastX = event.clientX;
+      lastY = event.clientY;
+    };
+    const onEnd = (event: PointerEvent) => {
+      if (event.pointerId === active) active = null;
+    };
+
+    el.addEventListener('pointerdown', onDown);
+    el.addEventListener('pointermove', onMove);
+    el.addEventListener('pointerup', onEnd);
+    el.addEventListener('pointercancel', onEnd);
+    return () => {
+      el.removeEventListener('pointerdown', onDown);
+      el.removeEventListener('pointermove', onMove);
+      el.removeEventListener('pointerup', onEnd);
+      el.removeEventListener('pointercancel', onEnd);
+    };
+  }, [ink.penOnly]);
+
   // Closing saves too: handwriting is too easy to lose to make Save the only
   // way out. A note scribbled by accident is removed from the notes list.
   const persist = useCallback(
@@ -189,9 +228,12 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
           onScroll={handleScroll}
           className='h-full overflow-auto'
           style={{
-            // With touch rejected as input the hand is free to scroll; while a
-            // finger can draw, the browser must not steal the gesture.
-            touchAction: ink.penOnly ? 'pan-x pan-y' : 'none',
+            // Never handed to the browser. Its gestures are not pen-aware, so
+            // anything allowed for a finger is allowed for a stylus too, and a
+            // pen stroke would be taken as a scroll and lost. Scrolling by
+            // hand is done below, from pointer events, where pen and finger
+            // can actually be told apart.
+            touchAction: 'none',
             userSelect: 'none',
             WebkitUserSelect: 'none',
             WebkitTouchCallout: 'none',

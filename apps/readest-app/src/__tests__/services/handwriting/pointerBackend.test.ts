@@ -161,30 +161,22 @@ describe('PointerHandwritingBackend stylus-only palm rejection', () => {
     expect(points.map((p) => p.slice(0, 2))).toEqual([[30, 40]]);
   });
 
-  it('lets the touch sequence through, so a finger can still scroll the page', () => {
+  it('still claims the touch sequence, so the browser cannot pan with the pen', () => {
     const { el, backend } = setup();
     backend.setPenOnly(true);
 
-    // With touch rejected as input, the hand is free to pan the view; claiming
-    // the sequence would leave a scrollable note that cannot be scrolled.
+    // Tempting to release the sequence here and let the hand scroll, but the
+    // browser's gestures are not pen-aware: whatever is allowed for a finger
+    // is allowed for a stylus, so releasing it lets a pen stroke become a
+    // scroll and the drawing is lost. Scrolling by hand is done by the view,
+    // from pointer events, not by handing the gesture back.
     const start = new Event('touchstart', { cancelable: true });
     const move = new Event('touchmove', { cancelable: true });
     el.dispatchEvent(start);
     el.dispatchEvent(move);
 
-    expect(start.defaultPrevented).toBe(false);
-    expect(move.defaultPrevented).toBe(false);
-  });
-
-  it('claims the touch sequence again once stylus-only is off', () => {
-    const { el, backend } = setup();
-    backend.setPenOnly(true);
-    backend.setPenOnly(false);
-
-    const start = new Event('touchstart', { cancelable: true });
-    el.dispatchEvent(start);
-
     expect(start.defaultPrevented).toBe(true);
+    expect(move.defaultPrevented).toBe(true);
   });
 
   it('leaves a mouse alone: stylus-only rejects touch, not other devices', () => {
