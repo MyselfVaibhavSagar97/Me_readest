@@ -10,10 +10,13 @@ import {
   type InkTool,
 } from '@/services/handwriting/model';
 import {
+  DEFAULT_ERASER,
   DEFAULT_PEN,
+  eraserRadiusFraction,
   fractionToMm,
   mmToFraction,
   roundThicknessMm,
+  type EraserSettings,
   type PenSettings,
 } from '@/services/notes/penSettings';
 import type { PageRect } from '@/services/handwriting/coords';
@@ -63,6 +66,7 @@ export const useQuickNoteInk = (note: QuickNote) => {
 
   const [tool, setTool] = useState<InkTool>('pen');
   const [pen, setPen] = useState<PenSettings>(DEFAULT_PEN);
+  const [eraser, setEraser] = useState<EraserSettings>(DEFAULT_ERASER);
   const [markerColor, setMarkerColor] = useState(DEFAULT_MARKER_COLOR);
   const [markerWidth, setMarkerWidth] = useState<number>(DEFAULT_MARKER_WIDTH);
   const [erasing, setErasing] = useState(false);
@@ -120,11 +124,17 @@ export const useQuickNoteInk = (note: QuickNote) => {
     nib: pen.nib,
     sensitivity: pen.sensitivity,
     stabilization: pen.stabilization,
+    eraseRadiusFraction: eraserRadiusFraction(eraser.sizeMm),
+    eraseMode: eraser.mode,
+    eraseTarget: eraser.target,
+    eraserPressure: eraser.pressure,
   };
   const optionsRef = useRef(engineOptions);
   optionsRef.current = engineOptions;
   const erasingRef = useRef(erasing);
   erasingRef.current = erasing;
+  const autoDeselectRef = useRef(eraser.autoDeselect);
+  autoDeselectRef.current = eraser.autoDeselect;
 
   /** Builds the drawing session once both the canvas and the page are known. */
   const ensureAttached = useCallback(() => {
@@ -137,6 +147,9 @@ export const useQuickNoteInk = (note: QuickNote) => {
     // radius from the pen width, so the eraser always matches the tool.
     service.setOptions(optionsRef.current);
     service.setEraseMode(erasingRef.current);
+    service.onEraseEnd(() => {
+      if (autoDeselectRef.current) setErasing(false);
+    });
     serviceRef.current = service;
     void service.attach(el).then(paint);
   }, [editor, paint]);
@@ -182,8 +195,24 @@ export const useQuickNoteInk = (note: QuickNote) => {
       nib: pen.nib,
       sensitivity: pen.sensitivity,
       stabilization: pen.stabilization,
+      eraseRadiusFraction: eraserRadiusFraction(eraser.sizeMm),
+      eraseMode: eraser.mode,
+      eraseTarget: eraser.target,
+      eraserPressure: eraser.pressure,
     });
-  }, [tool, color, width, penOnly, pen.nib, pen.sensitivity, pen.stabilization]);
+  }, [
+    tool,
+    color,
+    width,
+    penOnly,
+    pen.nib,
+    pen.sensitivity,
+    pen.stabilization,
+    eraser.sizeMm,
+    eraser.mode,
+    eraser.target,
+    eraser.pressure,
+  ]);
 
   useEffect(() => {
     serviceRef.current?.setEraseMode(erasing);
@@ -193,6 +222,12 @@ export const useQuickNoteInk = (note: QuickNote) => {
     setErasing(false);
     setTool(next);
   }, []);
+
+  /** Changes one or more of the eraser's settings, leaving the rest alone. */
+  const updateEraser = useCallback(
+    (patch: Partial<EraserSettings>) => setEraser((current) => ({ ...current, ...patch })),
+    [],
+  );
 
   /** Changes one or more of the pen's settings, leaving the rest alone. */
   const updatePen = useCallback(
@@ -213,6 +248,9 @@ export const useQuickNoteInk = (note: QuickNote) => {
     [marker, updatePen],
   );
 
+  /** Rubs out everything on the page the editor is showing. */
+  const clearPage = useCallback(() => serviceRef.current?.clear(), []);
+
   const setPenOnly = useCallback((next: boolean) => {
     setPenOnlyState(next);
     writePenOnly(next);
@@ -232,6 +270,9 @@ export const useQuickNoteInk = (note: QuickNote) => {
     selectWidth,
     pen,
     updatePen,
+    eraser,
+    updateEraser,
+    clearPage,
     erasing,
     setErasing,
     penOnly,

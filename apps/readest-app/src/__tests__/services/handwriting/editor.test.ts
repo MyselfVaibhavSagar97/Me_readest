@@ -228,3 +228,115 @@ describe('HandwritingEditor', () => {
     expect(ed.strokes('sec:1')).toHaveLength(0);
   });
 });
+
+describe('HandwritingEditor erasing by area', () => {
+  const line = (id: string, y: number) =>
+    s(id, [
+      [0, y],
+      [1, y],
+    ]);
+
+  const twoLines = () =>
+    new HandwritingEditor({
+      p: { strokes: [line('a', 0.5), line('b', 0.9)], updatedAt: 0 },
+    });
+
+  it('still takes the whole stroke by default, which the reader relies on', () => {
+    const ed = twoLines();
+
+    expect(ed.erase('p', [[0.5, 0.5]], 0.05)).toBe(1);
+    expect(ed.strokes('p').map((x) => x.id)).toEqual(['b']);
+  });
+
+  it('cuts the stroke it crosses and leaves the rest of the page alone', () => {
+    const ed = twoLines();
+
+    expect(ed.erase('p', [[0.5, 0.5]], 0.05, undefined, { mode: 'area' })).toBe(1);
+
+    // The crossed line comes back as two pieces; the other is untouched.
+    expect(ed.strokes('p')).toHaveLength(3);
+    expect(ed.strokes('p').filter((x) => x.id === 'b')).toHaveLength(1);
+  });
+
+  it('undoes a cut in one step, not one step per piece', () => {
+    const ed = twoLines();
+    ed.erase('p', [[0.5, 0.5]], 0.05, undefined, { mode: 'area' });
+
+    ed.undo('p');
+
+    expect(ed.strokes('p').map((x) => x.id)).toEqual(['a', 'b']);
+  });
+
+  it('takes anchored ink whole, since a piece of it could not be re-pinned', () => {
+    const anchored: InkStroke = { ...line('x', 0.5), anchor: 'epubcfi(/6/4!/4/2)' };
+    const ed = new HandwritingEditor({ p: { strokes: [anchored], updatedAt: 0 } });
+
+    ed.erase('p', [[0.5, 0.5]], 0.05, undefined, { mode: 'area' });
+
+    expect(ed.strokes('p')).toEqual([]);
+  });
+
+  it('reports nothing and changes nothing when the eraser misses', () => {
+    const ed = twoLines();
+
+    expect(ed.erase('p', [[0.5, 0.2]], 0.01, undefined, { mode: 'area' })).toBe(0);
+    expect(ed.strokes('p')).toHaveLength(2);
+  });
+});
+
+describe('HandwritingEditor lasso and targeted erasing', () => {
+  const pen = (id: string, y: number) =>
+    s(id, [
+      [0.4, y],
+      [0.6, y],
+    ]);
+  const highlight = (id: string, y: number): InkStroke => ({ ...pen(id, y), tool: 'marker' });
+
+  /** A square loop around the middle of the page. */
+  const loop: [number, number][] = [
+    [0.3, 0.3],
+    [0.7, 0.3],
+    [0.7, 0.7],
+    [0.3, 0.7],
+  ];
+
+  it('takes what the loop encloses and leaves what it does not', () => {
+    const ed = new HandwritingEditor({
+      p: { strokes: [pen('in', 0.5), pen('out', 0.9)], updatedAt: 0 },
+    });
+
+    expect(ed.erase('p', loop, 0, undefined, { mode: 'lasso' })).toBe(1);
+    expect(ed.strokes('p').map((x) => x.id)).toEqual(['out']);
+  });
+
+  it('erases only the highlighter when told to, leaving the writing', () => {
+    const ed = new HandwritingEditor({
+      p: { strokes: [pen('writing', 0.5), highlight('marked', 0.5)], updatedAt: 0 },
+    });
+
+    ed.erase('p', [[0.5, 0.5]], 0.05, undefined, { target: 'highlighter' });
+
+    expect(ed.strokes('p').map((x) => x.id)).toEqual(['writing']);
+  });
+
+  it('combines a lasso with erasing the highlighter only', () => {
+    const ed = new HandwritingEditor({
+      p: { strokes: [pen('writing', 0.5), highlight('marked', 0.5)], updatedAt: 0 },
+    });
+
+    ed.erase('p', loop, 0, undefined, { mode: 'lasso', target: 'highlighter' });
+
+    expect(ed.strokes('p').map((x) => x.id)).toEqual(['writing']);
+  });
+
+  it('undoes a lasso in one step', () => {
+    const ed = new HandwritingEditor({
+      p: { strokes: [pen('a', 0.5), pen('b', 0.52)], updatedAt: 0 },
+    });
+    ed.erase('p', loop, 0, undefined, { mode: 'lasso' });
+
+    ed.undo('p');
+
+    expect(ed.strokes('p').map((x) => x.id)).toEqual(['a', 'b']);
+  });
+});

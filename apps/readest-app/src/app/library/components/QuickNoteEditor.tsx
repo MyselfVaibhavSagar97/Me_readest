@@ -12,6 +12,7 @@ import {
 } from 'react-icons/ri';
 import type { IconType } from 'react-icons';
 
+import Dialog from '@/components/Dialog';
 import { eventDispatcher } from '@/utils/event';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useThemeStore } from '@/store/themeStore';
@@ -20,6 +21,7 @@ import { QUICK_NOTE_ASPECT, type QuickNote } from '@/types/notes';
 import AnnotationToolButton from '@/app/reader/components/annotator/AnnotationToolButton';
 import HandwritingOptions from '@/app/reader/components/handwriting/HandwritingOptions';
 import PenPanel from './PenPanel';
+import EraserPanel from './EraserPanel';
 import { useQuickNoteInk } from '../hooks/useQuickNoteInk';
 
 /**
@@ -58,7 +60,9 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
   const areaRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
-  const [openPanel, setOpenPanel] = useState<InkTool | null>(null);
+  // Which tool has its settings dropped down, if any.
+  const [openPanel, setOpenPanel] = useState<InkTool | 'eraser' | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
   const ink = useQuickNoteInk(note);
   const { attachCanvas, setPageRect, strokes } = ink;
 
@@ -156,9 +160,15 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
                 'absolute top-full start-3 z-10 mt-2 rounded-2xl border px-3 py-3',
               )}
             >
-              {openPanel === 'pen' ? (
-                <PenPanel pen={ink.pen} onChange={ink.updatePen} />
-              ) : (
+              {openPanel === 'pen' && <PenPanel pen={ink.pen} onChange={ink.updatePen} />}
+              {openPanel === 'eraser' && (
+                <EraserPanel
+                  eraser={ink.eraser}
+                  onChange={ink.updateEraser}
+                  onClearPage={() => setConfirmClear(true)}
+                />
+              )}
+              {openPanel === 'marker' && (
                 <HandwritingOptions
                   tool={ink.tool}
                   color={ink.color}
@@ -209,8 +219,14 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
               tooltipText={_('Eraser')}
               Icon={RiEraserLine}
               onClick={() => {
-                setOpenPanel(null);
-                ink.setErasing(!ink.erasing);
+                // Picking the eraser selects it; tapping it again opens its
+                // settings, exactly as the pen behaves.
+                if (ink.erasing) {
+                  setOpenPanel((open) => (open === 'eraser' ? null : 'eraser'));
+                } else {
+                  setOpenPanel(null);
+                  ink.setErasing(true);
+                }
               }}
             />
           </div>
@@ -251,6 +267,40 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
           />
         </div>
       </div>
+      {confirmClear && (
+        <Dialog
+          isOpen
+          title={_('Clear current page?')}
+          boxClassName='h-auto! max-h-[80vh]! sm:max-w-sm'
+          onClose={() => setConfirmClear(false)}
+        >
+          <div className='flex flex-col gap-3'>
+            <p className='text-sm'>
+              {_('This rubs out everything on the page. Undo will bring it back.')}
+            </p>
+            <div className='flex justify-end gap-2'>
+              <button
+                type='button'
+                onClick={() => setConfirmClear(false)}
+                className='btn btn-ghost btn-sm rounded-lg'
+              >
+                {_('Cancel')}
+              </button>
+              <button
+                type='button'
+                onClick={() => {
+                  ink.clearPage();
+                  setConfirmClear(false);
+                  setOpenPanel(null);
+                }}
+                className='btn btn-error btn-sm rounded-lg'
+              >
+                {_('Clear')}
+              </button>
+            </div>
+          </div>
+        </Dialog>
+      )}
       <div ref={areaRef} className='flex min-h-0 flex-1 items-center justify-center'>
         {size && (
           <canvas
