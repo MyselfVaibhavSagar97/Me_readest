@@ -4,11 +4,11 @@ import type { ReactNode } from 'react';
 
 import QuickNotes from '@/app/library/components/QuickNotes';
 import type { InkStroke } from '@/services/handwriting/model';
-import type { QuickNote } from '@/types/notes';
+import type { QuickNote, QuickNotesData } from '@/types/notes';
 
 const h = vi.hoisted(() => ({
-  saved: [] as QuickNote[][],
-  stored: [] as QuickNote[],
+  saved: [] as QuickNotesData[],
+  stored: { notes: [], folders: [] } as QuickNotesData,
   /** Ink the stubbed editor reports when its Save is pressed. */
   drawn: [{ id: 's1', color: '#1a1a1a', width: 0.006, points: [[0.1, 0.2]] }] as InkStroke[],
 }));
@@ -29,15 +29,15 @@ vi.mock('@/context/EnvContext', () => ({
   useEnv: () => ({
     appService: {
       loadQuickNotes: async () => h.stored,
-      saveQuickNotes: async (notes: QuickNote[]) => {
-        h.saved.push(notes);
+      saveQuickNotes: async (data: QuickNotesData) => {
+        h.saved.push(data);
       },
     },
   }),
 }));
 
 // The editor owns a canvas and the ink engine; here it stands in for them, so
-// this test covers the Add button, persistence and the notes list only.
+// these cases cover the notes screen and what it stores.
 vi.mock('@/app/library/components/QuickNoteEditor', () => ({
   default: ({
     note,
@@ -49,7 +49,8 @@ vi.mock('@/app/library/components/QuickNoteEditor', () => ({
     onClose: () => void;
   }) => (
     <div data-testid='quick-note-editor'>
-      <span>{note.title}</span>
+      <span>editing {note.title}</span>
+      <span data-testid='editing-folder'>{note.folder ?? ''}</span>
       <button type='button' onClick={() => onPersist({ ...note, ink: h.drawn })}>
         stub-save
       </button>
@@ -60,9 +61,22 @@ vi.mock('@/app/library/components/QuickNoteEditor', () => ({
   ),
 }));
 
+const note = (id: string, overrides: Partial<QuickNote> = {}): QuickNote => ({
+  id,
+  title: id,
+  createdAt: 1,
+  updatedAt: 1,
+  ink: h.drawn,
+  ...overrides,
+});
+
+const openNotes = async () => {
+  fireEvent.click(await screen.findByRole('button', { name: 'Notes' }));
+};
+
 beforeEach(() => {
   h.saved = [];
-  h.stored = [];
+  h.stored = { notes: [], folders: [] };
 });
 
 afterEach(() => {
@@ -71,59 +85,141 @@ afterEach(() => {
 });
 
 describe('QuickNotes', () => {
-  it('offers an Add button that opens a blank note to write on', async () => {
+  it('offers a Notes button that opens the notes screen', async () => {
     render(<QuickNotes />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Add Note' }));
+    await openNotes();
+
+    expect(screen.getByRole('dialog', { name: 'Notes' })).toBeTruthy();
+    expect(screen.getByText('Nothing here yet. Start a note and it will show up.')).toBeTruthy();
+  });
+
+  it('starts a blank note from the notes screen', async () => {
+    render(<QuickNotes />);
+    await openNotes();
+
+    fireEvent.click(screen.getByRole('button', { name: 'New note' }));
 
     expect(screen.getByTestId('quick-note-editor')).toBeTruthy();
   });
 
   it('stores a note that was written on', async () => {
     render(<QuickNotes />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Add Note' }));
+    await openNotes();
+    fireEvent.click(screen.getByRole('button', { name: 'New note' }));
     fireEvent.click(screen.getByText('stub-save'));
 
     await waitFor(() => expect(h.saved).toHaveLength(1));
-    expect(h.saved[0]).toHaveLength(1);
-    expect(h.saved[0]![0]!.ink).toEqual(h.drawn);
+    expect(h.saved[0]!.notes).toHaveLength(1);
+    expect(h.saved[0]!.notes[0]!.ink).toEqual(h.drawn);
   });
 
-  it('keeps a note that was opened and closed without a mark off the list', async () => {
+  it('keeps a note that was opened and closed without a mark off the screen', async () => {
     render(<QuickNotes />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Add Note' }));
+    await openNotes();
+    fireEvent.click(screen.getByRole('button', { name: 'New note' }));
     fireEvent.click(screen.getByText('stub-close'));
 
     expect(h.saved).toEqual([]);
-    expect(screen.queryByRole('button', { name: 'Notes' })).toBeNull();
   });
 
   it('lists the notes already on disk and reopens the one picked', async () => {
-    h.stored = [
-      { id: 'n1', title: 'Shopping list', createdAt: 1, updatedAt: 2, ink: h.drawn },
-      { id: 'n2', title: 'Meeting', createdAt: 3, updatedAt: 4, ink: h.drawn },
-    ];
+    h.stored = { notes: [note('Shopping list'), note('Meeting')], folders: [] };
     render(<QuickNotes />);
+    await openNotes();
 
-    const notesButton = await screen.findByRole('button', { name: 'Notes' });
-    fireEvent.click(notesButton);
+    fireEvent.click(await screen.findByText('Shopping list'));
 
-    // Newest first.
-    expect(screen.getByText('Meeting')).toBeTruthy();
-    fireEvent.click(screen.getByText('Shopping list'));
-
-    expect(screen.getByTestId('quick-note-editor')).toBeTruthy();
-    expect(screen.getByText('Shopping list')).toBeTruthy();
+    expect(screen.getByText('editing Shopping list')).toBeTruthy();
   });
 
   it('removes a deleted note from what is stored', async () => {
-    h.stored = [{ id: 'n1', title: 'Shopping list', createdAt: 1, updatedAt: 2, ink: h.drawn }];
+    h.stored = { notes: [note('Shopping list')], folders: [] };
     render(<QuickNotes />);
+    await openNotes();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Notes' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
 
     await waitFor(() => expect(h.saved).toHaveLength(1));
-    expect(h.saved[0]).toEqual([]);
+    expect(h.saved[0]!.notes).toEqual([]);
+  });
+
+  it('renames a note', async () => {
+    h.stored = { notes: [note('Untitled')], folders: [] };
+    render(<QuickNotes />);
+    await openNotes();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Rename' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), {
+      target: { value: 'Shopping' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(h.saved).toHaveLength(1));
+    expect(h.saved[0]!.notes[0]!.title).toBe('Shopping');
+  });
+
+  describe('folders', () => {
+    it('makes a folder and keeps it even though it is empty', async () => {
+      render(<QuickNotes />);
+      await openNotes();
+
+      fireEvent.click(screen.getByRole('button', { name: 'New folder' }));
+      fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), {
+        target: { value: 'Maths' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      await waitFor(() => expect(h.saved).toHaveLength(1));
+      expect(h.saved[0]!.folders).toEqual(['Maths']);
+    });
+
+    it('opens a folder and starts new notes inside it', async () => {
+      h.stored = { notes: [], folders: ['Maths'] };
+      render(<QuickNotes />);
+      await openNotes();
+
+      fireEvent.click(await screen.findByText('Maths'));
+      fireEvent.click(screen.getByRole('button', { name: 'New note' }));
+
+      expect(screen.getByTestId('editing-folder').textContent).toBe('Maths');
+    });
+
+    it('shows only the notes filed in the folder being looked at', async () => {
+      h.stored = {
+        notes: [note('Inside', { folder: 'Maths' }), note('Outside')],
+        folders: ['Maths'],
+      };
+      render(<QuickNotes />);
+      await openNotes();
+
+      expect(await screen.findByText('Outside')).toBeTruthy();
+      expect(screen.queryByText('Inside')).toBeNull();
+
+      fireEvent.click(screen.getByText('Maths'));
+
+      expect(screen.getByText('Inside')).toBeTruthy();
+      expect(screen.queryByText('Outside')).toBeNull();
+    });
+
+    it('deletes a folder with everything in it, and steps back out of it', async () => {
+      h.stored = { notes: [note('Inside', { folder: 'Maths' })], folders: ['Maths'] };
+      render(<QuickNotes />);
+      await openNotes();
+      fireEvent.click(await screen.findByText('Maths'));
+
+      // Back at the top level to reach the folder's own delete action.
+      fireEvent.click(screen.getByRole('button', { name: 'All notes' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+      // Deleting a folder takes its notes with it, so it asks first. The
+      // card's own action and the confirmation share a name.
+      const confirms = screen.getAllByRole('button', { name: 'Delete' });
+      fireEvent.click(confirms[confirms.length - 1]!);
+
+      await waitFor(() => expect(h.saved).toHaveLength(1));
+      expect(h.saved[0]!.folders).toEqual([]);
+      expect(h.saved[0]!.notes).toEqual([]);
+    });
   });
 });
