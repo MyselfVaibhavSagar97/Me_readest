@@ -1,8 +1,7 @@
 import clsx from 'clsx';
-import React, { useEffect, useRef } from 'react';
+import React, { useMemo } from 'react';
 
 import { useTranslation } from '@/hooks/useTranslation';
-import { renderStrokes } from '@/services/handwriting/renderer';
 import { HIGHLIGHTER_TIPS, type InkNib } from '@/services/handwriting/nibs';
 import type { InkPoint } from '@/services/handwriting/model';
 import {
@@ -14,6 +13,14 @@ import {
   roundHighlighterMm,
   type HighlighterSettings,
 } from '@/services/notes/penSettings';
+import {
+  ColorRail,
+  PREVIEW_PAGE_FRACTION,
+  SliderRow,
+  StrokePreview,
+  SwitchRow,
+  ToolPanel,
+} from './ToolPanelParts';
 
 const TIP_LABELS: Partial<Record<InkNib, string>> = {
   chisel: 'Chisel',
@@ -54,48 +61,6 @@ const STRAIGHT_POINTS: InkPoint[] = [
   [0.92, 0.5],
 ];
 
-/** How much of a page the preview strip stands for (see PenPanel). */
-const PREVIEW_PAGE_FRACTION = 3;
-
-const HighlighterPreview: React.FC<{ highlighter: HighlighterSettings }> = ({ highlighter }) => {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (!canvas || !ctx) return;
-    const box = canvas.getBoundingClientRect();
-    if (box.width <= 0 || box.height <= 0) return;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.max(1, Math.round(box.width * dpr));
-    canvas.height = Math.max(1, Math.round(box.height * dpr));
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    renderStrokes(
-      ctx,
-      [
-        {
-          id: 'highlighter-preview',
-          color: highlighter.color,
-          width: mmToFraction(highlighter.thicknessMm) * PREVIEW_PAGE_FRACTION,
-          tool: 'marker',
-          nib: highlighter.tip,
-          points: highlighter.straightLine ? STRAIGHT_POINTS : PREVIEW_POINTS,
-        },
-      ],
-      { left: 0, top: 0, width: box.width, height: box.height },
-    );
-  }, [highlighter]);
-
-  return (
-    <canvas
-      ref={canvasRef}
-      aria-hidden='true'
-      className='eink-bordered border-base-300/50 h-16 w-full rounded-lg border'
-      style={{ backgroundColor: '#fdfdfb' }}
-    />
-  );
-};
-
 interface HighlighterPanelProps {
   highlighter: HighlighterSettings;
   onChange: (patch: Partial<HighlighterSettings>) => void;
@@ -108,14 +73,22 @@ interface HighlighterPanelProps {
  */
 const HighlighterPanel: React.FC<HighlighterPanelProps> = ({ highlighter, onChange }) => {
   const _ = useTranslation();
-  const custom = !HIGHLIGHTER_COLORS.includes(
-    highlighter.color as (typeof HIGHLIGHTER_COLORS)[number],
+  const sample = useMemo(
+    () => [
+      {
+        id: 'highlighter-preview',
+        color: highlighter.color,
+        width: mmToFraction(highlighter.thicknessMm) * PREVIEW_PAGE_FRACTION,
+        tool: 'marker' as const,
+        nib: highlighter.tip,
+        points: highlighter.straightLine ? STRAIGHT_POINTS : PREVIEW_POINTS,
+      },
+    ],
+    [highlighter.color, highlighter.thicknessMm, highlighter.tip, highlighter.straightLine],
   );
 
   return (
-    <div className='flex w-72 max-w-[85vw] flex-col gap-4'>
-      <p className='text-center text-sm font-medium'>{_('Highlighter')}</p>
-
+    <ToolPanel title={_('Highlighter')}>
       <div className='flex items-end justify-center gap-6'>
         {HIGHLIGHTER_TIPS.map((tip) => {
           const active = highlighter.tip === tip;
@@ -145,85 +118,31 @@ const HighlighterPanel: React.FC<HighlighterPanelProps> = ({ highlighter, onChan
         })}
       </div>
 
-      <HighlighterPreview highlighter={highlighter} />
+      <StrokePreview className='h-16' strokes={sample} />
 
-      <div className='flex flex-col gap-1'>
-        <div className='flex items-baseline justify-between'>
-          <span className='text-sm'>{_('Thickness')}</span>
-          <span className='text-base-content/60 text-xs tabular-nums'>
-            {highlighter.thicknessMm.toFixed(2)}mm
-          </span>
-        </div>
-        <input
-          type='range'
-          className='range range-xs'
-          aria-label={_('Thickness')}
-          min={MIN_HIGHLIGHTER_MM}
-          max={MAX_HIGHLIGHTER_MM}
-          step={HIGHLIGHTER_STEP_MM}
-          value={highlighter.thicknessMm}
-          onChange={(event) =>
-            onChange({ thicknessMm: roundHighlighterMm(Number(event.target.value)) })
-          }
-        />
-      </div>
+      <SliderRow
+        label={_('Thickness')}
+        display={`${highlighter.thicknessMm.toFixed(2)}mm`}
+        min={MIN_HIGHLIGHTER_MM}
+        max={MAX_HIGHLIGHTER_MM}
+        step={HIGHLIGHTER_STEP_MM}
+        value={highlighter.thicknessMm}
+        onChange={(mm) => onChange({ thicknessMm: roundHighlighterMm(mm) })}
+      />
 
-      <label className='flex cursor-pointer items-center justify-between gap-2'>
-        <span className='text-sm'>{_('Draw straight line')}</span>
-        <input
-          type='checkbox'
-          role='switch'
-          aria-label={_('Draw straight line')}
-          checked={highlighter.straightLine}
-          onChange={(event) => onChange({ straightLine: event.target.checked })}
-          className='toggle toggle-sm'
-        />
-      </label>
+      <SwitchRow
+        label={_('Draw straight line')}
+        checked={highlighter.straightLine}
+        onChange={(straightLine) => onChange({ straightLine })}
+      />
 
-      <div className='flex flex-col gap-1.5'>
-        <span className='text-sm'>{_('Colour')}</span>
-        <div className='eink-bordered border-base-200 flex items-center justify-between rounded-full border px-2 py-1.5'>
-          {HIGHLIGHTER_COLORS.map((hex, index) => {
-            const selected =
-              index === 0 ? custom || highlighter.color === hex : highlighter.color === hex;
-            return index === 0 ? (
-              // The first swatch is also the way to any other colour.
-              <label
-                key={hex}
-                title={_('Pick a colour')}
-                className={clsx(
-                  'relative flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg',
-                  selected && 'ring-primary ring-2 ring-offset-1',
-                )}
-                style={{ backgroundColor: custom ? highlighter.color : hex }}
-              >
-                <input
-                  type='color'
-                  aria-label={_('Pick a colour')}
-                  value={highlighter.color}
-                  onChange={(event) => onChange({ color: event.target.value })}
-                  className='absolute inset-0 cursor-pointer opacity-0'
-                />
-                <span className='text-[9px] leading-none text-black/60'>▾</span>
-              </label>
-            ) : (
-              <button
-                key={hex}
-                type='button'
-                aria-label={_('Ink Color')}
-                aria-pressed={selected}
-                onClick={() => onChange({ color: hex })}
-                className={clsx(
-                  'h-7 w-7 rounded-lg p-0',
-                  selected && 'ring-primary ring-2 ring-offset-1',
-                )}
-                style={{ backgroundColor: hex }}
-              />
-            );
-          })}
-        </div>
-      </div>
-    </div>
+      <ColorRail
+        label={_('Colour')}
+        colors={HIGHLIGHTER_COLORS}
+        value={highlighter.color}
+        onChange={(color) => onChange({ color })}
+      />
+    </ToolPanel>
   );
 };
 

@@ -118,6 +118,10 @@ See [docs/safe-area-insets.md](docs/safe-area-insets.md) for rules on handling t
 
 Four engines sit behind `TTSClient`, including recorded-narration playback from EPUB 3 Media Overlays and device-local audiobook pairings. Gate behaviour on `TTSCapabilities`, never on client identity. See [docs/read-along-narration.md](docs/read-along-narration.md).
 
+### Handwritten notes
+
+The library's notes feature runs on the reader's ink engine, so a change under `src/services/handwriting/` changes the reader too. Read [docs/notes.md](docs/notes.md) before touching that directory, `src/services/notes/`, or the notes components: it says which layer a change belongs in, which three engine properties are load-bearing (normalized strokes, byte-identical legacy ink, reader-preserving defaults), and why a drawing surface keeps `touch-action: none`. Panels are built from `ToolPanelParts`; restyling them means editing that one file, not the three panels.
+
 ### Design System
 
 UI/UX rules — surface tiers, action vocabulary, settings primitives (`BoxedList`, `SettingsRow`, `SettingsSwitchRow`, `SettingsSelect`, `NavigationRow`, `Tips`, etc.), boxed-list anatomy, RTL conventions, e-ink overlay, and anti-patterns — live in [DESIGN.md](DESIGN.md). Codify recurring decisions there so they persist for the team and future contributors. Reach for the primitives in `src/components/settings/primitives/` instead of inlining chassis classes.

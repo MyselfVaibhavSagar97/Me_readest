@@ -1,8 +1,7 @@
 import clsx from 'clsx';
-import React, { useEffect, useRef } from 'react';
+import React, { useMemo } from 'react';
 
 import { useTranslation } from '@/hooks/useTranslation';
-import { renderStrokes } from '@/services/handwriting/renderer';
 import { INK_NIBS, type InkNib } from '@/services/handwriting/nibs';
 import type { InkPoint } from '@/services/handwriting/model';
 import {
@@ -14,6 +13,13 @@ import {
   roundThicknessMm,
   type PenSettings,
 } from '@/services/notes/penSettings';
+import {
+  ColorRail,
+  PREVIEW_PAGE_FRACTION,
+  SliderRow,
+  StrokePreview,
+  ToolPanel,
+} from './ToolPanelParts';
 
 const NIB_LABELS: Partial<Record<InkNib, string>> = {
   fountain: 'Fountain',
@@ -86,89 +92,6 @@ const PREVIEW_POINTS: InkPoint[] = Array.from({ length: 72 }, (_unused, i): InkP
   ];
 });
 
-/**
- * How much of a page the preview stands for. Widths are stored as a fraction
- * of the page, so the sample is scaled up to keep its thickness honest
- * against a strip this size rather than a whole sheet.
- */
-const PREVIEW_PAGE_FRACTION = 3;
-
-const PenPreview: React.FC<{ pen: PenSettings }> = ({ pen }) => {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (!canvas || !ctx) return;
-    const box = canvas.getBoundingClientRect();
-    if (box.width <= 0 || box.height <= 0) return;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.max(1, Math.round(box.width * dpr));
-    canvas.height = Math.max(1, Math.round(box.height * dpr));
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    renderStrokes(
-      ctx,
-      [
-        {
-          id: 'pen-preview',
-          color: pen.color,
-          width: mmToFraction(pen.thicknessMm) * PREVIEW_PAGE_FRACTION,
-          nib: pen.nib,
-          sensitivity: pen.sensitivity,
-          points: PREVIEW_POINTS,
-        },
-      ],
-      { left: 0, top: 0, width: box.width, height: box.height },
-    );
-  }, [pen]);
-
-  return (
-    <canvas
-      ref={canvasRef}
-      aria-hidden='true'
-      className='eink-bordered border-base-300/50 h-16 w-full rounded-lg border'
-      style={{ backgroundColor: '#fdfdfb' }}
-    />
-  );
-};
-
-interface SliderRowProps {
-  label: string;
-  value: string;
-  min: number;
-  max: number;
-  step: number;
-  current: number;
-  onChange: (value: number) => void;
-}
-
-const SliderRow: React.FC<SliderRowProps> = ({
-  label,
-  value,
-  min,
-  max,
-  step,
-  current,
-  onChange,
-}) => (
-  <div className='flex flex-col gap-1'>
-    <div className='flex items-baseline justify-between'>
-      <span className='text-sm'>{label}</span>
-      <span className='text-base-content/60 text-xs tabular-nums'>{value}</span>
-    </div>
-    <input
-      type='range'
-      className='range range-xs'
-      aria-label={label}
-      min={min}
-      max={max}
-      step={step}
-      value={current}
-      onChange={(event) => onChange(Number(event.target.value))}
-    />
-  </div>
-);
-
 interface PenPanelProps {
   pen: PenSettings;
   onChange: (patch: Partial<PenSettings>) => void;
@@ -182,12 +105,22 @@ interface PenPanelProps {
  */
 const PenPanel: React.FC<PenPanelProps> = ({ pen, onChange }) => {
   const _ = useTranslation();
-  const custom = !PEN_COLORS.includes(pen.color as (typeof PEN_COLORS)[number]);
+  const sample = useMemo(
+    () => [
+      {
+        id: 'pen-preview',
+        color: pen.color,
+        width: mmToFraction(pen.thicknessMm) * PREVIEW_PAGE_FRACTION,
+        nib: pen.nib,
+        sensitivity: pen.sensitivity,
+        points: PREVIEW_POINTS,
+      },
+    ],
+    [pen.color, pen.thicknessMm, pen.nib, pen.sensitivity],
+  );
 
   return (
-    <div className='flex w-72 max-w-[85vw] flex-col gap-4'>
-      <p className='text-center text-sm font-medium'>{_(`${NIB_LABELS[pen.nib] ?? pen.nib} pen`)}</p>
-
+    <ToolPanel title={_(`${NIB_LABELS[pen.nib] ?? pen.nib} pen`)}>
       <div className='flex items-end justify-between gap-1'>
         {INK_NIBS.map((nib) => {
           const active = pen.nib === nib;
@@ -213,81 +146,45 @@ const PenPanel: React.FC<PenPanelProps> = ({ pen, onChange }) => {
         })}
       </div>
 
-      <PenPreview pen={pen} />
+      <StrokePreview className='h-16' strokes={sample} />
 
       <SliderRow
         label={_('Pressure sensitivity')}
-        value={`${Math.round(pen.sensitivity * 100)}%`}
+        display={`${Math.round(pen.sensitivity * 100)}%`}
         min={0}
         max={1}
         step={0.05}
-        current={pen.sensitivity}
+        value={pen.sensitivity}
         onChange={(sensitivity) => onChange({ sensitivity })}
       />
 
       <SliderRow
         label={_('Thickness')}
-        value={`${pen.thicknessMm.toFixed(2)}mm`}
+        display={`${pen.thicknessMm.toFixed(2)}mm`}
         min={MIN_THICKNESS_MM}
         max={MAX_THICKNESS_MM}
         step={THICKNESS_STEP_MM}
-        current={pen.thicknessMm}
+        value={pen.thicknessMm}
         onChange={(mm) => onChange({ thicknessMm: roundThicknessMm(mm) })}
       />
 
       <SliderRow
         label={_('Stroke Stabilization')}
-        value={`${Math.round(pen.stabilization * 100)}%`}
+        display={`${Math.round(pen.stabilization * 100)}%`}
         min={0}
         max={1}
         step={0.05}
-        current={pen.stabilization}
+        value={pen.stabilization}
         onChange={(stabilization) => onChange({ stabilization })}
       />
 
-      <div className='flex flex-col gap-1.5'>
-        <span className='text-sm'>{_('Colour')}</span>
-        <div className='eink-bordered border-base-200 flex items-center justify-between rounded-full border px-2 py-1.5'>
-          {PEN_COLORS.map((hex, index) => {
-            const selected = index === 0 ? custom || pen.color === hex : pen.color === hex;
-            return index === 0 ? (
-              // The first swatch is also the way to any other colour.
-              <label
-                key={hex}
-                title={_('Pick a colour')}
-                className={clsx(
-                  'relative flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg',
-                  selected && 'ring-primary ring-2 ring-offset-1',
-                )}
-                style={{ backgroundColor: custom ? pen.color : hex }}
-              >
-                <input
-                  type='color'
-                  aria-label={_('Pick a colour')}
-                  value={pen.color}
-                  onChange={(event) => onChange({ color: event.target.value })}
-                  className='absolute inset-0 cursor-pointer opacity-0'
-                />
-                <span className='text-[9px] leading-none text-white opacity-80'>▾</span>
-              </label>
-            ) : (
-              <button
-                key={hex}
-                type='button'
-                aria-label={_('Ink Color')}
-                aria-pressed={selected}
-                onClick={() => onChange({ color: hex })}
-                className={clsx(
-                  'h-7 w-7 rounded-lg p-0',
-                  selected && 'ring-primary ring-2 ring-offset-1',
-                )}
-                style={{ backgroundColor: hex }}
-              />
-            );
-          })}
-        </div>
-      </div>
-    </div>
+      <ColorRail
+        label={_('Colour')}
+        colors={PEN_COLORS}
+        value={pen.color}
+        onChange={(color) => onChange({ color })}
+      />
+    </ToolPanel>
   );
 };
 

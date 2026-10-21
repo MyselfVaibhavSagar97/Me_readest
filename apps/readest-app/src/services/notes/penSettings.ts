@@ -12,6 +12,14 @@ import type { EraseMode, EraseTarget } from '@/services/handwriting/editor';
  */
 export const PAGE_WIDTH_MM = 210;
 
+/**
+ * The page is paper, not a themed surface: stored ink keeps the colour it was
+ * drawn with, so a dark page would hide black ink in dark mode and on e-ink.
+ * The page and every preview of a tool read from here, so a sample can never
+ * sit on a different paper than the page it claims to show.
+ */
+export const PAPER_COLOR = '#fdfdfb';
+
 export const mmToFraction = (mm: number) => mm / PAGE_WIDTH_MM;
 export const fractionToMm = (fraction: number) => fraction * PAGE_WIDTH_MM;
 

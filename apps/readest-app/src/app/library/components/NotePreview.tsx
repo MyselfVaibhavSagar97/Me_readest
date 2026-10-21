@@ -3,9 +3,7 @@ import React, { useEffect, useRef } from 'react';
 import { renderStrokes } from '@/services/handwriting/renderer';
 import type { InkStroke } from '@/services/handwriting/model';
 import { QUICK_NOTE_ASPECT } from '@/types/notes';
-
-/** The page is paper, as it is in the editor, so ink reads at its own colour. */
-const PAPER = '#fdfdfb';
+import { PAPER_COLOR } from '@/services/notes/penSettings';
 
 interface NotePreviewProps {
   ink: InkStroke[];
@@ -39,7 +37,7 @@ const NotePreview: React.FC<NotePreviewProps> = ({ ink, className }) => {
       ref={canvasRef}
       aria-hidden='true'
       className={className}
-      style={{ aspectRatio: `${QUICK_NOTE_ASPECT}`, backgroundColor: PAPER }}
+      style={{ aspectRatio: `${QUICK_NOTE_ASPECT}`, backgroundColor: PAPER_COLOR }}
     />
   );
 };

@@ -7,9 +7,17 @@ import {
   ERASER_STEP_MM,
   MAX_ERASER_MM,
   MIN_ERASER_MM,
+  PAGE_WIDTH_MM,
   roundEraserMm,
   type EraserSettings,
 } from '@/services/notes/penSettings';
+import {
+  PAPER,
+  PREVIEW_PAGE_FRACTION,
+  SliderRow,
+  SwitchRow,
+  ToolPanel,
+} from './ToolPanelParts';
 
 const MODES: { mode: EraseMode; label: string; hint: string }[] = [
   { mode: 'area', label: 'Pixel erasure', hint: 'Rubs out only what it passes over' },
@@ -54,28 +62,6 @@ const ModeIcon: React.FC<{ mode: EraseMode; className?: string }> = ({ mode, cla
   </svg>
 );
 
-const SwitchRow: React.FC<{
-  label: string;
-  hint?: string;
-  checked: boolean;
-  onChange: (next: boolean) => void;
-}> = ({ label, hint, checked, onChange }) => (
-  <label className='flex cursor-pointer items-center justify-between gap-3'>
-    <span className='flex min-w-0 flex-col'>
-      <span className='text-sm'>{label}</span>
-      {hint && <span className='text-base-content/55 text-xs'>{hint}</span>}
-    </span>
-    <input
-      type='checkbox'
-      role='switch'
-      aria-label={label}
-      checked={checked}
-      onChange={(event) => onChange(event.target.checked)}
-      className='toggle toggle-sm shrink-0'
-    />
-  </label>
-);
-
 interface EraserPanelProps {
   eraser: EraserSettings;
   onChange: (patch: Partial<EraserSettings>) => void;
@@ -91,14 +77,12 @@ interface EraserPanelProps {
  */
 const EraserPanel: React.FC<EraserPanelProps> = ({ eraser, onChange, onClearPage }) => {
   const _ = useTranslation();
-  // The preview strip stands for a third of the page across, so the circle
+  // The preview strip stands for a fraction of the page across, so the circle
   // shown is the eraser as it will actually meet the paper.
-  const previewSize = (eraser.sizeMm / (210 / 3)) * 100;
+  const previewSize = (eraser.sizeMm / (PAGE_WIDTH_MM / PREVIEW_PAGE_FRACTION)) * 100;
 
   return (
-    <div className='flex w-72 max-w-[85vw] flex-col gap-4'>
-      <p className='text-center text-sm font-medium'>{_('Eraser')}</p>
-
+    <ToolPanel title={_('Eraser')}>
       <div className='flex items-start justify-between gap-1'>
         {MODES.map(({ mode, label, hint }) => {
           const active = eraser.mode === mode;
@@ -128,9 +112,11 @@ const EraserPanel: React.FC<EraserPanelProps> = ({ eraser, onChange, onClearPage
 
       {eraser.mode !== 'lasso' && (
         <>
+          {/* Not a StrokePreview: what matters here is the eraser's footprint
+              against the paper, not ink. Same paper, same strip, no canvas. */}
           <div
             className='eink-bordered border-base-300/50 flex h-14 items-center justify-center rounded-lg border'
-            style={{ backgroundColor: '#fdfdfb' }}
+            style={{ backgroundColor: PAPER }}
           >
             <span
               aria-hidden='true'
@@ -144,32 +130,22 @@ const EraserPanel: React.FC<EraserPanelProps> = ({ eraser, onChange, onClearPage
             />
           </div>
 
-          <div className='flex flex-col gap-1'>
-            <div className='flex items-baseline justify-between'>
-              <span className='text-sm'>{_('Size')}</span>
-              <span className='text-base-content/60 text-xs tabular-nums'>
-                {eraser.sizeMm.toFixed(2)}mm
-              </span>
-            </div>
-            <input
-              type='range'
-              className='range range-xs'
-              aria-label={_('Size')}
-              min={MIN_ERASER_MM}
-              max={MAX_ERASER_MM}
-              step={ERASER_STEP_MM}
-              value={eraser.sizeMm}
-              onChange={(event) => onChange({ sizeMm: roundEraserMm(Number(event.target.value)) })}
-            />
-          </div>
+          <SliderRow
+            label={_('Size')}
+            display={`${eraser.sizeMm.toFixed(2)}mm`}
+            min={MIN_ERASER_MM}
+            max={MAX_ERASER_MM}
+            step={ERASER_STEP_MM}
+            value={eraser.sizeMm}
+            onChange={(mm) => onChange({ sizeMm: roundEraserMm(mm) })}
+          />
 
-          <div className='eink-bordered border-base-200 rounded-lg border px-3 py-2'>
-            <SwitchRow
-              label={_('Pressure-sensitive eraser')}
-              checked={eraser.pressure}
-              onChange={(pressure) => onChange({ pressure })}
-            />
-          </div>
+          <SwitchRow
+            boxed
+            label={_('Pressure-sensitive eraser')}
+            checked={eraser.pressure}
+            onChange={(pressure) => onChange({ pressure })}
+          />
         </>
       )}
 
@@ -194,7 +170,7 @@ const EraserPanel: React.FC<EraserPanelProps> = ({ eraser, onChange, onClearPage
       >
         {_('Clear current page')}
       </button>
-    </div>
+    </ToolPanel>
   );
 };
 

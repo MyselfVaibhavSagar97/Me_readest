@@ -18,17 +18,12 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { useThemeStore } from '@/store/themeStore';
 import type { InkTool } from '@/services/handwriting/model';
 import { QUICK_NOTE_ASPECT, type QuickNote } from '@/types/notes';
+import { PAPER_COLOR } from '@/services/notes/penSettings';
 import AnnotationToolButton from '@/app/reader/components/annotator/AnnotationToolButton';
 import PenPanel from './PenPanel';
 import EraserPanel from './EraserPanel';
 import HighlighterPanel from './HighlighterPanel';
 import { useQuickNoteInk } from '../hooks/useQuickNoteInk';
-
-/**
- * The page is paper, not a themed surface: stored ink keeps the colour it was
- * drawn with, so a dark page would hide black ink in dark mode and on e-ink.
- */
-const PAPER = '#fdfdfb';
 
 const TOOLS: { tool: InkTool; label: string; Icon: IconType }[] = [
   { tool: 'pen', label: 'Pen', Icon: RiPencilLine },
@@ -300,7 +295,7 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
             style={{
               width: size.width,
               height: size.height,
-              backgroundColor: PAPER,
+              backgroundColor: PAPER_COLOR,
               touchAction: 'none',
               userSelect: 'none',
               WebkitUserSelect: 'none',
