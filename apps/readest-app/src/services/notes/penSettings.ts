@@ -4,6 +4,11 @@ import {
   type InkNib,
 } from '@/services/handwriting/nibs';
 import type { EraseMode, EraseTarget } from '@/services/handwriting/editor';
+import {
+  SELECTABLE_KINDS,
+  type LassoShape,
+  type SelectableKind,
+} from '@/services/handwriting/selection';
 
 /**
  * A note page is A4, so a pen's width can be quoted in millimetres rather
@@ -135,3 +140,31 @@ export const HIGHLIGHTER_COLORS = [
   '#60a5fa',
   '#f472b6',
 ] as const;
+
+/** Everything the lasso panel sets. */
+export interface LassoSettings {
+  shape: LassoShape;
+  /**
+   * The Selectable switches, as the kinds that are on. A kind the app does
+   * not have yet simply has no switch: the panel is built from what exists,
+   * so it never offers a control that does nothing.
+   */
+  kinds: SelectableKind[];
+}
+
+export const DEFAULT_LASSO: LassoSettings = {
+  shape: 'free',
+  kinds: [...SELECTABLE_KINDS],
+};
+
+/**
+ * The Selectable list with one kind switched on or off. Kept in the module's
+ * own order rather than the order they were toggled, so the panel's switches
+ * never reshuffle under the hand.
+ */
+export const withKind = (
+  kinds: readonly SelectableKind[],
+  kind: SelectableKind,
+  on: boolean,
+): SelectableKind[] =>
+  SELECTABLE_KINDS.filter((k) => (k === kind ? on : kinds.includes(k)));

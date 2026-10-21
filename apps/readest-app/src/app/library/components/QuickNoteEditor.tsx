@@ -23,7 +23,27 @@ import AnnotationToolButton from '@/app/reader/components/annotator/AnnotationTo
 import PenPanel from './PenPanel';
 import EraserPanel from './EraserPanel';
 import HighlighterPanel from './HighlighterPanel';
+import LassoPanel from './LassoPanel';
+import NoteSelection from './NoteSelection';
 import { useQuickNoteInk } from '../hooks/useQuickNoteInk';
+
+/**
+ * The lasso: a dashed loop round ink, drawn rather than borrowed — no icon
+ * set here has one. Sized in `em` like the react-icons beside it, since the
+ * toolbar button renders an icon with no props of its own.
+ */
+const LassoIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg viewBox='0 0 24 24' width='1em' height='1em' className={className} aria-hidden='true'>
+    <rect x='8' y='10' width='8' height='4' rx='1' fill='currentColor' opacity='0.4' />
+    <path
+      d='M5 12 C5 6.5, 19 6.5, 19 12 C19 17.5, 5 17.5, 5 12 Z'
+      fill='none'
+      stroke='currentColor'
+      strokeWidth='1.6'
+      strokeDasharray='3 2.5'
+    />
+  </svg>
+);
 
 const TOOLS: { tool: InkTool; label: string; Icon: IconType }[] = [
   { tool: 'pen', label: 'Pen', Icon: RiPencilLine },
@@ -56,7 +76,7 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   // Which tool has its settings dropped down, if any.
-  const [openPanel, setOpenPanel] = useState<InkTool | 'eraser' | null>(null);
+  const [openPanel, setOpenPanel] = useState<InkTool | 'eraser' | 'lasso' | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const ink = useQuickNoteInk(note);
   const { attachCanvas, setPageRect, strokes } = ink;
@@ -162,6 +182,9 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
                   onClearPage={() => setConfirmClear(true)}
                 />
               )}
+              {openPanel === 'lasso' && (
+                <LassoPanel lasso={ink.lasso} onChange={ink.updateLasso} />
+              )}
             </div>
           </>
         )}
@@ -211,6 +234,23 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
                 } else {
                   setOpenPanel(null);
                   ink.setErasing(true);
+                }
+              }}
+            />
+          </div>
+          <div className={clsx('rounded-md', ink.lassoing && 'bg-base-300 eink:border')}>
+            <AnnotationToolButton
+              showTooltip
+              tooltipText={_('Lasso')}
+              Icon={LassoIcon}
+              onClick={() => {
+                // Same as the pen and the eraser: picking it up selects it,
+                // tapping it again opens its settings.
+                if (ink.lassoing) {
+                  setOpenPanel((open) => (open === 'lasso' ? null : 'lasso'));
+                } else {
+                  setOpenPanel(null);
+                  ink.setLassoing(true);
                 }
               }}
             />
@@ -288,20 +328,33 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
       )}
       <div ref={areaRef} className='flex min-h-0 flex-1 items-center justify-center'>
         {size && (
-          <canvas
-            ref={setCanvas}
-            aria-label={_('Note Page')}
-            className='eink-bordered border-base-300/60 border'
-            style={{
-              width: size.width,
-              height: size.height,
-              backgroundColor: PAPER_COLOR,
-              touchAction: 'none',
-              userSelect: 'none',
-              WebkitUserSelect: 'none',
-              WebkitTouchCallout: 'none',
-            }}
-          />
+          // The page, with room above it for whatever the lasso is holding.
+          <div className='relative' style={{ width: size.width, height: size.height }}>
+            <canvas
+              ref={setCanvas}
+              aria-label={_('Note Page')}
+              className='eink-bordered border-base-300/60 h-full w-full border'
+              style={{
+                backgroundColor: PAPER_COLOR,
+                touchAction: 'none',
+                userSelect: 'none',
+                WebkitUserSelect: 'none',
+                WebkitTouchCallout: 'none',
+              }}
+            />
+            {ink.lassoing && ink.selectionBounds && (
+              <NoteSelection
+                bounds={ink.selectionBounds}
+                page={size}
+                onBegin={ink.beginSelectionDrag}
+                onMove={ink.moveSelectionTo}
+                onScale={ink.scaleSelectionTo}
+                onEnd={ink.endSelectionDrag}
+                onDelete={ink.deleteSelection}
+                onDuplicate={ink.duplicateSelection}
+              />
+            )}
+          </div>
         )}
       </div>
     </div>
