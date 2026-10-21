@@ -249,7 +249,11 @@ const NotesHome: React.FC<NotesHomeProps> = ({
                   onClick={() => onOpenNote(note)}
                   className='flex flex-col text-start'
                 >
-                  <NotePreview ink={note.ink} className='border-base-200 w-full border-b' />
+                  <NotePreview
+                    ink={note.ink}
+                    images={note.images}
+                    className='border-base-200 w-full border-b'
+                  />
                   <span className='line-clamp-1 px-3 pt-2 text-sm'>{note.title}</span>
                   <span className='text-base-content/55 px-3 text-xs'>
                     {new Date(note.updatedAt).toLocaleDateString()}

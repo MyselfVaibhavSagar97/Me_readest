@@ -24,8 +24,10 @@ import PenPanel from './PenPanel';
 import EraserPanel from './EraserPanel';
 import HighlighterPanel from './HighlighterPanel';
 import LassoPanel from './LassoPanel';
+import PicturePanel, { PictureIcon } from './PicturePanel';
 import NoteSelection from './NoteSelection';
 import { useQuickNoteInk } from '../hooks/useQuickNoteInk';
+import { useQuickNoteImages } from '../hooks/useQuickNoteImages';
 
 /**
  * The lasso: a dashed loop round ink, drawn rather than borrowed — no icon
@@ -76,9 +78,16 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   // Which tool has its settings dropped down, if any.
-  const [openPanel, setOpenPanel] = useState<InkTool | 'eraser' | 'lasso' | null>(null);
+  const [openPanel, setOpenPanel] = useState<InkTool | 'eraser' | 'lasso' | 'picture' | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const ink = useQuickNoteInk(note);
+  const pictures = useQuickNoteImages(note);
+  /**
+   * While the picture tool is in hand the pictures sit above the ink and
+   * answer to the finger; with any other tool they are background, so
+   * writing over them goes to the canvas as it always has.
+   */
+  const handlingPictures = openPanel === 'picture' || pictures.selected !== null;
   const { attachCanvas, setPageRect, strokes } = ink;
 
   // How big the page can be, from the space left above the dock. Re-measured
@@ -120,8 +129,14 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
   // Closing saves too: handwriting is too easy to lose to make Save the only
   // way out. A note scribbled by accident is removed from the notes list.
   const persist = useCallback(
-    () => onPersist({ ...note, ink: strokes(), updatedAt: Date.now() }),
-    [note, onPersist, strokes],
+    () =>
+      onPersist({
+        ...note,
+        ink: strokes(),
+        images: pictures.images,
+        updatedAt: Date.now(),
+      }),
+    [note, onPersist, pictures.images, strokes],
   );
 
   const handleSave = useCallback(() => {
@@ -184,6 +199,13 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
               )}
               {openPanel === 'lasso' && (
                 <LassoPanel lasso={ink.lasso} onChange={ink.updateLasso} />
+              )}
+              {openPanel === 'picture' && (
+                <PicturePanel
+                  onInsertFromAlbum={() => void pictures.insertFromAlbum()}
+                  inserting={pictures.inserting}
+                  count={pictures.images.length}
+                />
               )}
             </div>
           </>
@@ -252,6 +274,20 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
                   setOpenPanel(null);
                   ink.setLassoing(true);
                 }
+              }}
+            />
+          </div>
+          {/* A picture is placed rather than drawn, so this opens its panel
+              straight away instead of taking a turn in the hand first. */}
+          <div className={clsx('rounded-md', openPanel === 'picture' && 'bg-base-300 eink:border')}>
+            <AnnotationToolButton
+              showTooltip
+              tooltipText={_('Picture')}
+              Icon={PictureIcon}
+              onClick={() => {
+                setOpenPanel((open) => (open === 'picture' ? null : 'picture'));
+                ink.setLassoing(false);
+                ink.setErasing(false);
               }}
             />
           </div>
@@ -328,20 +364,74 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
       )}
       <div ref={areaRef} className='flex min-h-0 flex-1 items-center justify-center'>
         {size && (
-          // The page, with room above it for whatever the lasso is holding.
-          <div className='relative' style={{ width: size.width, height: size.height }}>
+          // The page: paper, then pictures, then the ink on top of them. The
+          // paper is this element's, not the canvas's, so the canvas can stay
+          // transparent and let the pictures underneath show through.
+          <div
+            className='eink-bordered border-base-300/60 relative border'
+            style={{ width: size.width, height: size.height, backgroundColor: PAPER_COLOR }}
+            // Tapping the paper beside a picture lets go of it, as tapping
+            // off a selection does everywhere else.
+            onPointerDown={handlingPictures ? () => pictures.select(null) : undefined}
+          >
+            {pictures.images.map((image) => {
+              const url = pictures.urls[image.file];
+              return (
+                <img
+                  key={image.id}
+                  src={url}
+                  alt=''
+                  draggable={false}
+                  onPointerDown={
+                    handlingPictures
+                      ? (event) => {
+                          event.stopPropagation();
+                          pictures.select(image.id);
+                        }
+                      : undefined
+                  }
+                  className='absolute select-none'
+                  style={{
+                    left: `${image.left * 100}%`,
+                    top: `${image.top * 100}%`,
+                    width: `${image.width * 100}%`,
+                    height: `${image.height * 100}%`,
+                    // Inert unless the picture tool is in hand, so writing
+                    // over a picture reaches the canvas as it always has.
+                    pointerEvents: handlingPictures ? 'auto' : 'none',
+                    touchAction: 'none',
+                    // A picture that failed to load leaves a faint box rather
+                    // than nothing, so it can still be found and removed.
+                    backgroundColor: url ? undefined : 'rgba(0,0,0,0.04)',
+                  }}
+                />
+              );
+            })}
             <canvas
               ref={setCanvas}
               aria-label={_('Note Page')}
-              className='eink-bordered border-base-300/60 h-full w-full border'
+              className='absolute inset-0 h-full w-full'
               style={{
-                backgroundColor: PAPER_COLOR,
                 touchAction: 'none',
                 userSelect: 'none',
                 WebkitUserSelect: 'none',
                 WebkitTouchCallout: 'none',
+                // Out of the way while a picture is being handled, so a drag
+                // on the picture is not also read as a pen stroke.
+                pointerEvents: handlingPictures ? 'none' : 'auto',
               }}
             />
+            {pictures.selected && pictures.selectedBounds && (
+              <NoteSelection
+                bounds={pictures.selectedBounds}
+                page={size}
+                onBegin={pictures.beginImageDrag}
+                onMove={pictures.moveImageTo}
+                onScale={pictures.scaleImageTo}
+                onEnd={pictures.endImageDrag}
+                onDelete={pictures.deleteSelectedImage}
+              />
+            )}
             {ink.lassoing && ink.selectionBounds && (
               <NoteSelection
                 bounds={ink.selectionBounds}

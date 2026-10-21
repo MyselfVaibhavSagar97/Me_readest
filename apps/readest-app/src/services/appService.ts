@@ -46,8 +46,13 @@ import {
   loadQuickNotes as loadQuickNotesFromDisk,
   saveQuickNotes as saveQuickNotesToDisk,
 } from '@/services/notes/quickNotePersistence';
+import {
+  noteImageURL as noteImageURLFromDisk,
+  pruneNoteImages as pruneNoteImagesOnDisk,
+  saveNoteImage as saveNoteImageToDisk,
+} from '@/services/notes/noteImageStore';
 import type { RssFeed } from '@/types/rss';
-import type { QuickNotesData } from '@/types/notes';
+import type { QuickNote, QuickNotesData } from '@/types/notes';
 
 export abstract class BaseAppService implements AppService {
   osPlatform: OsPlatform = getOSPlatform();
@@ -656,6 +661,21 @@ export abstract class BaseAppService implements AppService {
 
   async saveQuickNotes(data: QuickNotesData): Promise<void> {
     return saveQuickNotesToDisk(this.fs, data);
+  }
+
+  /** Copies a chosen picture in beside the notes; returns its stored name. */
+  async saveNoteImage(sourcePath: string, id: string): Promise<string> {
+    return saveNoteImageToDisk(this.fs, sourcePath, id);
+  }
+
+  /** A URL the page can show a stored picture at; the caller revokes it. */
+  async noteImageURL(file: string): Promise<string> {
+    return noteImageURLFromDisk(this.fs, file);
+  }
+
+  /** Removes stored pictures that no note refers to any more. */
+  async pruneNoteImages(notes: readonly QuickNote[]): Promise<number> {
+    return pruneNoteImagesOnDisk(this.fs, notes);
   }
 
   async loadLibraryBooks(): Promise<Book[]> {

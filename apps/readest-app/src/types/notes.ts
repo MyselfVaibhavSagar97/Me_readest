@@ -26,6 +26,33 @@ export interface QuickNote {
    */
   folder?: string;
   ink: InkStroke[];
+  /**
+   * Pictures on the page, under the ink. Absent on every note written before
+   * a note could hold anything but strokes, which reads as a note with no
+   * pictures — the same note it has always been.
+   */
+  images?: NoteImage[];
+}
+
+/**
+ * A picture placed on a note's page.
+ *
+ * Only the file's name is kept here. The picture itself is a file of its own
+ * beside the notes, because a photograph held inside the notes file would be
+ * rewritten in full every time any note is saved, and a few of them would
+ * make that file unreadable to anything but this app.
+ *
+ * The box is in page fractions, exactly as ink is, so a picture keeps its
+ * place on the page whatever screen the note is opened on.
+ */
+export interface NoteImage {
+  id: string;
+  /** The file's name under the note-pictures directory. */
+  file: string;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
 }
 
 /**

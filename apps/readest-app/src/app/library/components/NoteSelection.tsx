@@ -41,7 +41,8 @@ export interface NoteSelectionProps {
   onScale: (factor: number) => void;
   onEnd: () => void;
   onDelete: () => void;
-  onDuplicate: () => void;
+  /** Absent when there is nothing sensible to copy, as for a picture. */
+  onDuplicate?: () => void;
 }
 
 /**
@@ -158,15 +159,17 @@ const NoteSelection: React.FC<NoteSelectionProps> = ({
           transform: above ? 'translateY(calc(-100% - 8px))' : 'translateY(8px)',
         }}
       >
-        <button
-          type='button'
-          aria-label={_('Duplicate')}
-          title={_('Duplicate')}
-          onClick={onDuplicate}
-          className='eink-bordered bg-base-100 border-base-300 not-eink:shadow-sm flex h-8 w-8 items-center justify-center rounded-lg border p-0'
-        >
-          <CopyIcon className='h-4 w-4' />
-        </button>
+        {onDuplicate && (
+          <button
+            type='button'
+            aria-label={_('Duplicate')}
+            title={_('Duplicate')}
+            onClick={onDuplicate}
+            className='eink-bordered bg-base-100 border-base-300 not-eink:shadow-sm flex h-8 w-8 items-center justify-center rounded-lg border p-0'
+          >
+            <CopyIcon className='h-4 w-4' />
+          </button>
+        )}
         <button
           type='button'
           aria-label={_('Delete')}
