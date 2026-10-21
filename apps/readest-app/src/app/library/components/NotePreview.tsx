@@ -25,10 +25,23 @@ const NotePreview: React.FC<NotePreviewProps> = ({ ink, images, className }) => 
   /** The pictures, once decoded; the ink is drawn without waiting for them. */
   const [loaded, setLoaded] = useState<{ image: NoteImage; el: HTMLImageElement }[]>([]);
 
+  // The service and the list are read when the work runs, not depended on.
+  // Both change identity on every render, and an effect that re-ran on that
+  // would re-run on its own state update — a loop with no way out.
+  const serviceRef = useRef(appService);
+  serviceRef.current = appService;
+  const imagesRef = useRef(images);
+  imagesRef.current = images;
+  /** Which pictures, as a value that only changes when they do. */
+  const fileKey = (images ?? []).map((image) => image.file).join('|');
+
   useEffect(() => {
-    const wanted = images ?? [];
-    if (!appService || wanted.length === 0) {
-      setLoaded([]);
+    const service = serviceRef.current;
+    const wanted = imagesRef.current ?? [];
+    if (!service || wanted.length === 0) {
+      // Keep the array we already have rather than a new empty one: a fresh
+      // array counts as a change, and this effect would start itself again.
+      setLoaded((current) => (current.length === 0 ? current : []));
       return;
     }
     let active = true;
@@ -37,7 +50,7 @@ const NotePreview: React.FC<NotePreviewProps> = ({ ink, images, className }) => 
       const decoded: { image: NoteImage; el: HTMLImageElement }[] = [];
       for (const image of wanted) {
         try {
-          const url = await appService.noteImageURL(image.file);
+          const url = await service.noteImageURL(image.file);
           urls.push(url);
           const el = new Image();
           await new Promise<void>((resolve) => {
@@ -57,7 +70,7 @@ const NotePreview: React.FC<NotePreviewProps> = ({ ink, images, className }) => 
       active = false;
       for (const url of urls) URL.revokeObjectURL(url);
     };
-  }, [appService, images]);
+  }, [fileKey]);
 
   useEffect(() => {
     const canvas = canvasRef.current;

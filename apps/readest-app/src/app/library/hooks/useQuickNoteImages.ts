@@ -41,23 +41,43 @@ export const useQuickNoteImages = (note: QuickNote) => {
   /** What a drag started from, so each frame resizes the original box. */
   const dragRef = useRef<{ id: string; from: NoteImage } | null>(null);
 
-  // Blob URLs for whatever the note holds, made once per picture and let go
-  // of when the editor closes — they would otherwise hold the bytes of every
-  // picture ever opened for as long as the app runs.
+  // Every URL handed out so far, so one can be let go of exactly once, when
+  // the editor closes. They would otherwise hold the bytes of every picture
+  // ever opened for as long as the app runs.
+  const urlsRef = useRef<Record<string, string>>({});
+  const serviceRef = useRef(appService);
+  serviceRef.current = appService;
+  /** Which pictures, as a value that only changes when they do. */
+  const fileKey = images.map((image) => image.file).join('|');
+
+  useEffect(
+    () => () => {
+      for (const url of Object.values<string>(urlsRef.current)) URL.revokeObjectURL(url);
+      urlsRef.current = {};
+    },
+    [],
+  );
+
+  // A URL for each picture that does not have one yet.
+  //
+  // This runs again whenever the set of pictures changes, and it must not
+  // let go of the URLs it made last time: those are the ones on screen, and
+  // revoking a picture's URL while it is still being shown empties it. So
+  // nothing is revoked here — only when the editor closes, above.
   useEffect(() => {
-    if (!appService) return;
+    const service = serviceRef.current;
+    if (!service) return;
     let active = true;
-    const made: string[] = [];
     void (async () => {
       for (const image of images) {
-        if (urls[image.file]) continue;
+        if (urlsRef.current[image.file]) continue;
         try {
-          const url = await appService.noteImageURL(image.file);
+          const url = await service.noteImageURL(image.file);
           if (!active) {
             URL.revokeObjectURL(url);
             return;
           }
-          made.push(url);
+          urlsRef.current[image.file] = url;
           setUrls((current) => ({ ...current, [image.file]: url }));
         } catch {
           // A picture whose file has gone shows as an empty box rather than
@@ -67,12 +87,12 @@ export const useQuickNoteImages = (note: QuickNote) => {
     })();
     return () => {
       active = false;
-      for (const url of made) URL.revokeObjectURL(url);
     };
-    // `urls` is written here, not read as a trigger: adding it would re-run
-    // this effect for every picture it resolves.
+    // Keyed on which pictures there are, not on the array's identity: the
+    // array is rebuilt on every change, and `appService` on every render, so
+    // depending on either would re-run this for its own state update.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appService, images]);
+  }, [fileKey]);
 
   /**
    * Opens the gallery and puts the chosen picture on the page. The file is
