@@ -10,10 +10,13 @@ import {
   type InkTool,
 } from '@/services/handwriting/model';
 import {
+  DEFAULT_ERASER,
   DEFAULT_PEN,
+  eraserRadiusFraction,
   fractionToMm,
   mmToFraction,
   roundThicknessMm,
+  type EraserSettings,
   type PenSettings,
 } from '@/services/notes/penSettings';
 import type { PageRect } from '@/services/handwriting/coords';
@@ -63,6 +66,7 @@ export const useQuickNoteInk = (note: QuickNote) => {
 
   const [tool, setTool] = useState<InkTool>('pen');
   const [pen, setPen] = useState<PenSettings>(DEFAULT_PEN);
+  const [eraser, setEraser] = useState<EraserSettings>(DEFAULT_ERASER);
   const [markerColor, setMarkerColor] = useState(DEFAULT_MARKER_COLOR);
   const [markerWidth, setMarkerWidth] = useState<number>(DEFAULT_MARKER_WIDTH);
   const [erasing, setErasing] = useState(false);
@@ -120,6 +124,8 @@ export const useQuickNoteInk = (note: QuickNote) => {
     nib: pen.nib,
     sensitivity: pen.sensitivity,
     stabilization: pen.stabilization,
+    eraseRadiusFraction: eraserRadiusFraction(eraser.sizeMm),
+    eraseMode: eraser.mode,
   };
   const optionsRef = useRef(engineOptions);
   optionsRef.current = engineOptions;
@@ -182,8 +188,20 @@ export const useQuickNoteInk = (note: QuickNote) => {
       nib: pen.nib,
       sensitivity: pen.sensitivity,
       stabilization: pen.stabilization,
+      eraseRadiusFraction: eraserRadiusFraction(eraser.sizeMm),
+      eraseMode: eraser.mode,
     });
-  }, [tool, color, width, penOnly, pen.nib, pen.sensitivity, pen.stabilization]);
+  }, [
+    tool,
+    color,
+    width,
+    penOnly,
+    pen.nib,
+    pen.sensitivity,
+    pen.stabilization,
+    eraser.sizeMm,
+    eraser.mode,
+  ]);
 
   useEffect(() => {
     serviceRef.current?.setEraseMode(erasing);
@@ -193,6 +211,12 @@ export const useQuickNoteInk = (note: QuickNote) => {
     setErasing(false);
     setTool(next);
   }, []);
+
+  /** Changes one or more of the eraser's settings, leaving the rest alone. */
+  const updateEraser = useCallback(
+    (patch: Partial<EraserSettings>) => setEraser((current) => ({ ...current, ...patch })),
+    [],
+  );
 
   /** Changes one or more of the pen's settings, leaving the rest alone. */
   const updatePen = useCallback(
@@ -232,6 +256,8 @@ export const useQuickNoteInk = (note: QuickNote) => {
     selectWidth,
     pen,
     updatePen,
+    eraser,
+    updateEraser,
     erasing,
     setErasing,
     penOnly,

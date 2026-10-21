@@ -1,5 +1,5 @@
 import { detectPenBackend, type PenBackend } from './capabilities';
-import { HandwritingEditor } from './editor';
+import { HandwritingEditor, type EraseMode } from './editor';
 import {
   DEFAULT_HANDWRITING_COLOR,
   DEFAULT_HANDWRITING_WIDTH,
@@ -39,6 +39,8 @@ export interface HandwritingOptions {
   sensitivity: number;
   /** 0..1; how much an incoming stroke is smoothed as it is drawn. */
   stabilization: number;
+  /** Whether the eraser takes whole strokes or only the ink under it. */
+  eraseMode: EraseMode;
 }
 
 /**
@@ -57,6 +59,7 @@ const DEFAULT_OPTIONS: HandwritingOptions = {
   nib: DEFAULT_NIB,
   sensitivity: DEFAULT_SENSITIVITY,
   stabilization: 0,
+  eraseMode: 'stroke',
 };
 
 /**
@@ -209,10 +212,14 @@ export class HandwritingService {
     this.options = {
       ...this.options,
       ...options,
-      eraseRadiusFraction: Math.max(
-        width * (tool === 'marker' ? 1 : ERASER_WIDTH_RATIO),
-        DEFAULT_OPTIONS.eraseRadiusFraction,
-      ),
+      // An eraser sized by hand wins; otherwise it tracks the tool, as a few
+      // pen widths or one marker band.
+      eraseRadiusFraction:
+        options.eraseRadiusFraction ??
+        Math.max(
+          width * (tool === 'marker' ? 1 : ERASER_WIDTH_RATIO),
+          DEFAULT_OPTIONS.eraseRadiusFraction,
+        ),
     };
     this.pointer.setPenOnly(this.options.penOnly);
     this.stabilizer.setStrength(this.options.stabilization);
@@ -398,6 +405,7 @@ export class HandwritingService {
           target.points,
           this.options.eraseRadiusFraction * target.scale,
           this.placeWith(target.anchoring),
+          this.options.eraseMode,
         );
       }
       this.eraseTail = kind === 'end' ? null : (path[path.length - 1] ?? null);

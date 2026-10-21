@@ -1,4 +1,5 @@
 import { DEFAULT_NIB, type InkNib } from '@/services/handwriting/nibs';
+import type { EraseMode } from '@/services/handwriting/editor';
 
 /**
  * A note page is A4, so a pen's width can be quoted in millimetres rather
@@ -44,3 +45,33 @@ export const DEFAULT_PEN: PenSettings = {
 
 /** The colours the panel offers, in swatch order; the first opens a picker. */
 export const PEN_COLORS = ['#1a1a1a', '#c62828', '#1f6feb', '#00796b', '#e3a008'] as const;
+
+/** Everything the eraser panel sets. */
+export interface EraserSettings {
+  /** The eraser's width on the page, in millimetres. */
+  sizeMm: number;
+  mode: EraseMode;
+}
+
+export const MIN_ERASER_MM = 1;
+export const MAX_ERASER_MM = 20;
+export const ERASER_STEP_MM = 0.5;
+
+export const DEFAULT_ERASER: EraserSettings = {
+  sizeMm: 4,
+  // Rubbing out the ink under the eraser is what an eraser does everywhere
+  // else; taking a whole stroke at a touch is the surprising behaviour, so
+  // it is the one that has to be chosen.
+  mode: 'area',
+};
+
+export const roundEraserMm = (mm: number) =>
+  Math.round(Math.min(MAX_ERASER_MM, Math.max(MIN_ERASER_MM, mm)) / ERASER_STEP_MM) *
+  ERASER_STEP_MM;
+
+/**
+ * The eraser's radius as the engine wants it: a fraction of the page width.
+ * The size on the panel is its full width, as a pen's thickness is, so half
+ * of it is the radius the engine rubs out to.
+ */
+export const eraserRadiusFraction = (sizeMm: number) => mmToFraction(sizeMm) / 2;

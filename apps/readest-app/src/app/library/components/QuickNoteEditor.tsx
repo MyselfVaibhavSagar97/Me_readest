@@ -20,6 +20,7 @@ import { QUICK_NOTE_ASPECT, type QuickNote } from '@/types/notes';
 import AnnotationToolButton from '@/app/reader/components/annotator/AnnotationToolButton';
 import HandwritingOptions from '@/app/reader/components/handwriting/HandwritingOptions';
 import PenPanel from './PenPanel';
+import EraserPanel from './EraserPanel';
 import { useQuickNoteInk } from '../hooks/useQuickNoteInk';
 
 /**
@@ -58,7 +59,8 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
   const areaRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
-  const [openPanel, setOpenPanel] = useState<InkTool | null>(null);
+  // Which tool has its settings dropped down, if any.
+  const [openPanel, setOpenPanel] = useState<InkTool | 'eraser' | null>(null);
   const ink = useQuickNoteInk(note);
   const { attachCanvas, setPageRect, strokes } = ink;
 
@@ -156,9 +158,11 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
                 'absolute top-full start-3 z-10 mt-2 rounded-2xl border px-3 py-3',
               )}
             >
-              {openPanel === 'pen' ? (
-                <PenPanel pen={ink.pen} onChange={ink.updatePen} />
-              ) : (
+              {openPanel === 'pen' && <PenPanel pen={ink.pen} onChange={ink.updatePen} />}
+              {openPanel === 'eraser' && (
+                <EraserPanel eraser={ink.eraser} onChange={ink.updateEraser} />
+              )}
+              {openPanel === 'marker' && (
                 <HandwritingOptions
                   tool={ink.tool}
                   color={ink.color}
@@ -209,8 +213,14 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
               tooltipText={_('Eraser')}
               Icon={RiEraserLine}
               onClick={() => {
-                setOpenPanel(null);
-                ink.setErasing(!ink.erasing);
+                // Picking the eraser selects it; tapping it again opens its
+                // settings, exactly as the pen behaves.
+                if (ink.erasing) {
+                  setOpenPanel((open) => (open === 'eraser' ? null : 'eraser'));
+                } else {
+                  setOpenPanel(null);
+                  ink.setErasing(true);
+                }
               }}
             />
           </div>
