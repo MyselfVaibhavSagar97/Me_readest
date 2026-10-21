@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest';
 
-import { erasedRuns, splitStroke } from '@/services/handwriting/pointEraser';
+import {
+  erasedRuns,
+  eraserPressureScale,
+  isInsidePath,
+  splitStroke,
+  strokeInsidePath,
+} from '@/services/handwriting/pointEraser';
 import type { InkPoint, InkStroke } from '@/services/handwriting/model';
 
 /** A horizontal line from x=0 to x=1 at y=0.5, as two stored points. */
@@ -158,5 +164,82 @@ describe('splitStroke', () => {
         [1, 0.5],
       ], 0.05),
     ).toEqual([]);
+  });
+});
+
+describe('lassoing ink', () => {
+  /** A square loop around the middle of the page. */
+  const loop: InkPoint[] = [
+    [0.3, 0.3],
+    [0.7, 0.3],
+    [0.7, 0.7],
+    [0.3, 0.7],
+  ];
+
+  it('knows inside from outside', () => {
+    expect(isInsidePath(loop, 0.5, 0.5)).toBe(true);
+    expect(isInsidePath(loop, 0.1, 0.5)).toBe(false);
+    expect(isInsidePath(loop, 0.5, 0.9)).toBe(false);
+  });
+
+  it('treats the loop as closed, since nobody draws the last millimetre', () => {
+    // The loop above is never explicitly closed back to its first point.
+    expect(isInsidePath(loop, 0.35, 0.65)).toBe(true);
+  });
+
+  it('is not a loop at all with fewer than three points', () => {
+    expect(isInsidePath([[0, 0]], 0, 0)).toBe(false);
+    expect(
+      isInsidePath(
+        [
+          [0, 0],
+          [1, 1],
+        ],
+        0.5,
+        0.5,
+      ),
+    ).toBe(false);
+  });
+
+  it('catches a stroke with any ink inside, not only one wholly enclosed', () => {
+    // Looping round part of a word is meant to take the word; demanding every
+    // point be enclosed would make the tool useless on anything long.
+    const crossing: InkPoint[] = [
+      [0.1, 0.5],
+      [0.5, 0.5],
+      [0.9, 0.5],
+    ];
+    const outside: InkPoint[] = [
+      [0.1, 0.1],
+      [0.2, 0.1],
+    ];
+
+    expect(strokeInsidePath(crossing, loop)).toBe(true);
+    expect(strokeInsidePath(outside, loop)).toBe(false);
+  });
+});
+
+describe('a pressure-sensitive eraser', () => {
+  it('does nothing at all while it is off', () => {
+    for (const pressure of [0, 0.5, 1]) {
+      expect(eraserPressureScale(pressure, false)).toBe(1);
+    }
+  });
+
+  it('pivots around an ordinary press, so turning it on does not resize it', () => {
+    expect(eraserPressureScale(0.5, true)).toBe(1);
+  });
+
+  it('rubs wider the harder it is pressed', () => {
+    expect(eraserPressureScale(1, true)).toBeGreaterThan(eraserPressureScale(0.5, true));
+    expect(eraserPressureScale(0, true)).toBeLessThan(eraserPressureScale(0.5, true));
+  });
+
+  it('never shrinks the eraser away to nothing', () => {
+    expect(eraserPressureScale(0, true)).toBeGreaterThan(0);
+  });
+
+  it('treats a device reporting no pressure as an ordinary press', () => {
+    expect(eraserPressureScale(undefined, true)).toBe(1);
   });
 });

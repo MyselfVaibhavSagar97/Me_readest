@@ -12,6 +12,7 @@ import {
 } from 'react-icons/ri';
 import type { IconType } from 'react-icons';
 
+import Dialog from '@/components/Dialog';
 import { eventDispatcher } from '@/utils/event';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useThemeStore } from '@/store/themeStore';
@@ -61,6 +62,7 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   // Which tool has its settings dropped down, if any.
   const [openPanel, setOpenPanel] = useState<InkTool | 'eraser' | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
   const ink = useQuickNoteInk(note);
   const { attachCanvas, setPageRect, strokes } = ink;
 
@@ -160,7 +162,11 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
             >
               {openPanel === 'pen' && <PenPanel pen={ink.pen} onChange={ink.updatePen} />}
               {openPanel === 'eraser' && (
-                <EraserPanel eraser={ink.eraser} onChange={ink.updateEraser} />
+                <EraserPanel
+                  eraser={ink.eraser}
+                  onChange={ink.updateEraser}
+                  onClearPage={() => setConfirmClear(true)}
+                />
               )}
               {openPanel === 'marker' && (
                 <HandwritingOptions
@@ -261,6 +267,40 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
           />
         </div>
       </div>
+      {confirmClear && (
+        <Dialog
+          isOpen
+          title={_('Clear current page?')}
+          boxClassName='h-auto! max-h-[80vh]! sm:max-w-sm'
+          onClose={() => setConfirmClear(false)}
+        >
+          <div className='flex flex-col gap-3'>
+            <p className='text-sm'>
+              {_('This rubs out everything on the page. Undo will bring it back.')}
+            </p>
+            <div className='flex justify-end gap-2'>
+              <button
+                type='button'
+                onClick={() => setConfirmClear(false)}
+                className='btn btn-ghost btn-sm rounded-lg'
+              >
+                {_('Cancel')}
+              </button>
+              <button
+                type='button'
+                onClick={() => {
+                  ink.clearPage();
+                  setConfirmClear(false);
+                  setOpenPanel(null);
+                }}
+                className='btn btn-error btn-sm rounded-lg'
+              >
+                {_('Clear')}
+              </button>
+            </div>
+          </div>
+        </Dialog>
+      )}
       <div ref={areaRef} className='flex min-h-0 flex-1 items-center justify-center'>
         {size && (
           <canvas

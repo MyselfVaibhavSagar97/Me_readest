@@ -1,5 +1,5 @@
 import { DEFAULT_NIB, type InkNib } from '@/services/handwriting/nibs';
-import type { EraseMode } from '@/services/handwriting/editor';
+import type { EraseMode, EraseTarget } from '@/services/handwriting/editor';
 
 /**
  * A note page is A4, so a pen's width can be quoted in millimetres rather
@@ -51,6 +51,12 @@ export interface EraserSettings {
   /** The eraser's width on the page, in millimetres. */
   sizeMm: number;
   mode: EraseMode;
+  /** Which ink it is allowed to take. */
+  target: EraseTarget;
+  /** Whether a firmer press rubs out wider. */
+  pressure: boolean;
+  /** Put the previous tool back after one rub, rather than staying on. */
+  autoDeselect: boolean;
 }
 
 export const MIN_ERASER_MM = 1;
@@ -63,6 +69,9 @@ export const DEFAULT_ERASER: EraserSettings = {
   // else; taking a whole stroke at a touch is the surprising behaviour, so
   // it is the one that has to be chosen.
   mode: 'area',
+  target: 'all',
+  pressure: false,
+  autoDeselect: false,
 };
 
 export const roundEraserMm = (mm: number) =>

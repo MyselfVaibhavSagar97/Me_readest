@@ -126,11 +126,15 @@ export const useQuickNoteInk = (note: QuickNote) => {
     stabilization: pen.stabilization,
     eraseRadiusFraction: eraserRadiusFraction(eraser.sizeMm),
     eraseMode: eraser.mode,
+    eraseTarget: eraser.target,
+    eraserPressure: eraser.pressure,
   };
   const optionsRef = useRef(engineOptions);
   optionsRef.current = engineOptions;
   const erasingRef = useRef(erasing);
   erasingRef.current = erasing;
+  const autoDeselectRef = useRef(eraser.autoDeselect);
+  autoDeselectRef.current = eraser.autoDeselect;
 
   /** Builds the drawing session once both the canvas and the page are known. */
   const ensureAttached = useCallback(() => {
@@ -143,6 +147,9 @@ export const useQuickNoteInk = (note: QuickNote) => {
     // radius from the pen width, so the eraser always matches the tool.
     service.setOptions(optionsRef.current);
     service.setEraseMode(erasingRef.current);
+    service.onEraseEnd(() => {
+      if (autoDeselectRef.current) setErasing(false);
+    });
     serviceRef.current = service;
     void service.attach(el).then(paint);
   }, [editor, paint]);
@@ -190,6 +197,8 @@ export const useQuickNoteInk = (note: QuickNote) => {
       stabilization: pen.stabilization,
       eraseRadiusFraction: eraserRadiusFraction(eraser.sizeMm),
       eraseMode: eraser.mode,
+      eraseTarget: eraser.target,
+      eraserPressure: eraser.pressure,
     });
   }, [
     tool,
@@ -201,6 +210,8 @@ export const useQuickNoteInk = (note: QuickNote) => {
     pen.stabilization,
     eraser.sizeMm,
     eraser.mode,
+    eraser.target,
+    eraser.pressure,
   ]);
 
   useEffect(() => {
@@ -237,6 +248,9 @@ export const useQuickNoteInk = (note: QuickNote) => {
     [marker, updatePen],
   );
 
+  /** Rubs out everything on the page the editor is showing. */
+  const clearPage = useCallback(() => serviceRef.current?.clear(), []);
+
   const setPenOnly = useCallback((next: boolean) => {
     setPenOnlyState(next);
     writePenOnly(next);
@@ -258,6 +272,7 @@ export const useQuickNoteInk = (note: QuickNote) => {
     updatePen,
     eraser,
     updateEraser,
+    clearPage,
     erasing,
     setErasing,
     penOnly,

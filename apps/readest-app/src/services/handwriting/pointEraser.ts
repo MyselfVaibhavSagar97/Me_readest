@@ -126,3 +126,40 @@ export const splitStroke = (
     id: nextPieceId(),
     points: roundPoints(simplifyPoints(run)),
   }));
+
+/**
+ * Whether a point lies inside a closed loop, by ray casting: count the times
+ * a ray cast sideways crosses the loop's edges — an odd count means inside.
+ * The loop does not have to be explicitly closed; the last point is treated
+ * as joined to the first, which is how a lasso is actually drawn.
+ */
+export const isInsidePath = (path: readonly InkPoint[], x: number, y: number): boolean => {
+  if (path.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = path.length - 1; i < path.length; j = i++) {
+    const [xi, yi] = path[i]!;
+    const [xj, yj] = path[j]!;
+    const straddles = yi > y !== yj > y;
+    if (straddles && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+};
+
+/**
+ * Whether a stroke was caught by a lasso. Any of its ink being inside counts:
+ * a loop drawn round part of a word is meant to take the word, and asking
+ * someone to enclose every last point of a stroke would make the tool
+ * useless on anything long.
+ */
+export const strokeInsidePath = (
+  points: readonly InkPoint[],
+  path: readonly InkPoint[],
+): boolean => points.some(([x, y]) => isInsidePath(path, x, y));
+
+/**
+ * How much a pressure reading scales the eraser, when the eraser is set to
+ * answer to pressure. It pivots around an ordinary press, as the pen's own
+ * sensitivity does, so turning it on does not quietly resize the eraser.
+ */
+export const eraserPressureScale = (pressure: number | undefined, enabled: boolean): number =>
+  enabled ? Math.max(0.25, 0.25 + 1.5 * (pressure ?? 0.5)) : 1;

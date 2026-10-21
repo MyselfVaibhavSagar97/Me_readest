@@ -1,11 +1,20 @@
 import type { InkPage, InkPoint, InkStroke } from './model';
-import { splitStroke } from './pointEraser';
+import { splitStroke, strokeInsidePath } from './pointEraser';
 
 /**
  * `stroke` takes away every stroke the eraser touches. `area` takes away only
  * the ink under it, so a line rubbed through the middle comes back as two.
+ * `lasso` takes away every stroke caught inside a loop drawn around them.
  */
-export type EraseMode = 'stroke' | 'area';
+export type EraseMode = 'stroke' | 'area' | 'lasso';
+
+/** Which ink an erase is allowed to touch. */
+export type EraseTarget = 'all' | 'highlighter';
+
+export interface EraseOptions {
+  mode?: EraseMode;
+  target?: EraseTarget;
+}
 
 interface PageState {
   strokes: InkStroke[];
@@ -111,7 +120,7 @@ export class HandwritingEditor {
     path: ArrayLike<InkPoint> | [number, number][],
     radius: number,
     place: PlaceStroke = asStored,
-    mode: EraseMode = 'stroke',
+    { mode = 'stroke', target = 'all' }: EraseOptions = {},
   ): number {
     const points = path as InkPoint[];
     const eraserSegs = segments(points);
@@ -121,7 +130,16 @@ export class HandwritingEditor {
     let touched = 0;
     for (const stroke of current) {
       const placed = place(stroke);
-      if (!placed || !touches(stroke, placed, eraserSegs, radius)) {
+      // An eraser aimed at the highlighter passes over pen ink entirely, so
+      // marking up text does not cost you the writing underneath it.
+      const eligible = target === 'all' || stroke.tool === 'marker';
+      const caught =
+        !!placed &&
+        eligible &&
+        (mode === 'lasso'
+          ? placed.some((piece) => strokeInsidePath(piece, points))
+          : touches(stroke, placed, eraserSegs, radius));
+      if (!caught) {
         next.push(stroke);
         continue;
       }
