@@ -19,12 +19,14 @@ import {
   DEFAULT_HIGHLIGHTER,
   DEFAULT_LASSO,
   DEFAULT_PEN,
+  DEFAULT_SHAPE,
   eraserRadiusFraction,
   mmToFraction,
   type EraserSettings,
   type HighlighterSettings,
   type LassoSettings,
   type PenSettings,
+  type ShapeSettings,
 } from '@/services/notes/penSettings';
 import type { PageRect } from '@/services/handwriting/coords';
 import type { QuickNote } from '@/types/notes';
@@ -76,8 +78,10 @@ export const useQuickNoteInk = (note: QuickNote) => {
   const [eraser, setEraser] = useState<EraserSettings>(DEFAULT_ERASER);
   const [highlighter, setHighlighter] = useState<HighlighterSettings>(DEFAULT_HIGHLIGHTER);
   const [lasso, setLasso] = useState<LassoSettings>(DEFAULT_LASSO);
+  const [shape, setShape] = useState<ShapeSettings>(DEFAULT_SHAPE);
   const [erasing, setErasing] = useState(false);
   const [lassoing, setLassoing] = useState(false);
+  const [shaping, setShaping] = useState(false);
   /** The ids the lasso caught; empty when nothing is picked up. */
   const [selection, setSelection] = useState<string[]>([]);
   const [penOnly, setPenOnlyState] = useState(false);
@@ -148,6 +152,10 @@ export const useQuickNoteInk = (note: QuickNote) => {
     eraserPressure: eraser.pressure,
     lassoShape: lasso.shape,
     lassoKinds: lasso.kinds,
+    shapeKind: shape.kind,
+    shapeColor: shape.color,
+    shapeWidth: mmToFraction(shape.thicknessMm),
+    shapeFill: shape.fill,
   };
   const optionsRef = useRef(engineOptions);
   optionsRef.current = engineOptions;
@@ -234,6 +242,10 @@ export const useQuickNoteInk = (note: QuickNote) => {
       eraserPressure: eraser.pressure,
       lassoShape: lasso.shape,
       lassoKinds: lasso.kinds,
+      shapeKind: shape.kind,
+      shapeColor: shape.color,
+      shapeWidth: mmToFraction(shape.thicknessMm),
+      shapeFill: shape.fill,
     });
   }, [
     tool,
@@ -252,11 +264,19 @@ export const useQuickNoteInk = (note: QuickNote) => {
     eraser.pressure,
     lasso.shape,
     lasso.kinds,
+    shape.kind,
+    shape.color,
+    shape.thicknessMm,
+    shape.fill,
   ]);
 
   useEffect(() => {
     serviceRef.current?.setEraseMode(erasing);
   }, [erasing]);
+
+  useEffect(() => {
+    serviceRef.current?.setShapeMode(shaping);
+  }, [shaping]);
 
   useEffect(() => {
     serviceRef.current?.setLassoMode(lassoing);
@@ -268,6 +288,7 @@ export const useQuickNoteInk = (note: QuickNote) => {
   const selectTool = useCallback((next: InkTool) => {
     setErasing(false);
     setLassoing(false);
+    setShaping(false);
     setTool(next);
   }, []);
 
@@ -296,16 +317,36 @@ export const useQuickNoteInk = (note: QuickNote) => {
     [],
   );
 
+  /** Changes one or more of the shape tool's settings, leaving the rest alone. */
+  const updateShape = useCallback(
+    (patch: Partial<ShapeSettings>) => setShape((current) => ({ ...current, ...patch })),
+    [],
+  );
+
   // One tool is in the hand at a time: picking up the eraser puts the lasso
   // down, and the other way round.
   const chooseEraser = useCallback((on: boolean) => {
     setErasing(on);
-    if (on) setLassoing(false);
+    if (on) {
+      setLassoing(false);
+      setShaping(false);
+    }
   }, []);
 
   const chooseLasso = useCallback((on: boolean) => {
     setLassoing(on);
-    if (on) setErasing(false);
+    if (on) {
+      setErasing(false);
+      setShaping(false);
+    }
+  }, []);
+
+  const chooseShape = useCallback((on: boolean) => {
+    setShaping(on);
+    if (on) {
+      setErasing(false);
+      setLassoing(false);
+    }
   }, []);
 
   /** The box round the picked-up ink, or null when nothing is picked up. */
@@ -400,6 +441,10 @@ export const useQuickNoteInk = (note: QuickNote) => {
     updateEraser,
     lasso,
     updateLasso,
+    shape,
+    updateShape,
+    shaping,
+    setShaping: chooseShape,
     clearPage,
     erasing,
     setErasing: chooseEraser,

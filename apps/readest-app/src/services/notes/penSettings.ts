@@ -9,6 +9,7 @@ import {
   type LassoShape,
   type SelectableKind,
 } from '@/services/handwriting/selection';
+import type { ShapeKind } from '@/services/handwriting/shapes';
 
 /**
  * A note page is A4, so a pen's width can be quoted in millimetres rather
@@ -168,3 +169,28 @@ export const withKind = (
   on: boolean,
 ): SelectableKind[] =>
   SELECTABLE_KINDS.filter((k) => (k === kind ? on : kinds.includes(k)));
+
+/** The shape range the slider covers: a fine liner up to a bold outline. */
+export const MIN_SHAPE_MM = 0.1;
+export const MAX_SHAPE_MM = 3;
+export const SHAPE_STEP_MM = 0.05;
+
+export const roundShapeMm = (mm: number) =>
+  Math.round(Math.min(MAX_SHAPE_MM, Math.max(MIN_SHAPE_MM, mm)) / SHAPE_STEP_MM) * SHAPE_STEP_MM;
+
+/** Everything the shape panel sets. */
+export interface ShapeSettings {
+  kind: ShapeKind;
+  /** Outline width in millimetres on the page. */
+  thicknessMm: number;
+  color: string;
+  /** Fill a closed shape with its own colour. */
+  fill: boolean;
+}
+
+export const DEFAULT_SHAPE: ShapeSettings = {
+  kind: 'line',
+  thicknessMm: 0.3,
+  color: '#1a1a1a',
+  fill: false,
+};

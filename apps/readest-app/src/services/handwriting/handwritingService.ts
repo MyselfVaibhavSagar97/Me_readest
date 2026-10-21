@@ -21,6 +21,7 @@ import {
   type LassoShape,
   type SelectableKind,
 } from './selection';
+import { isClosed, shapePoints, type ShapeKind } from './shapes';
 import type { InkAnchoring } from './anchor';
 
 /** Where a stroke drawn over a scrolled view belongs. */
@@ -63,6 +64,14 @@ export interface HandwritingOptions {
   lassoShape: LassoShape;
   /** Which kinds of ink the lasso is allowed to pick up. */
   lassoKinds: readonly SelectableKind[];
+  /** The shape a drag draws while the shape tool is in hand. */
+  shapeKind: ShapeKind;
+  /** Colour of a drawn shape; kept apart from the pen's own colour. */
+  shapeColor: string;
+  /** Stroke width of a drawn shape, as a fraction of the page. */
+  shapeWidth: number;
+  /** Whether a closed shape is filled with its colour. */
+  shapeFill: boolean;
 }
 
 /**
@@ -87,6 +96,10 @@ const DEFAULT_OPTIONS: HandwritingOptions = {
   eraserPressure: false,
   lassoShape: 'free',
   lassoKinds: SELECTABLE_KINDS,
+  shapeKind: 'line',
+  shapeColor: '#1a1a1a',
+  shapeWidth: 0.3 / 210,
+  shapeFill: false,
 };
 
 /**
@@ -148,6 +161,10 @@ export class HandwritingService {
   private liveErase = false;
   /** The lasso is picking ink up rather than drawing or rubbing out. */
   private liveLasso = false;
+  /** A drag draws a shape rather than a line of ink. */
+  private liveShape = false;
+  /** Where the shape being dragged was started from. */
+  private shapeStart: InkPoint | null = null;
   private stabilizer = new StrokeStabilizer();
   /** Last eraser sample, so consecutive batches erase along a connected path. */
   private eraseTail: InkPoint | null = null;
@@ -175,6 +192,7 @@ export class HandwritingService {
     if (this.live.length === 0) return [];
     // A lasso has to be visible while it is drawn, or there is no telling
     // what it is about to take.
+    if (this.liveShape) return [this.shapeStroke()];
     if (this.liveLasso) return [this.lassoStroke(this.lassoPath())];
     if (!this.liveErase) return [this.liveStroke()];
     return this.options.eraseMode === 'lasso' ? [this.lassoStroke(this.live)] : [];
@@ -201,6 +219,47 @@ export class HandwritingService {
     if (this.options.lassoShape !== 'rect' || this.live.length < 2) return this.live;
     const corners = rectPath(this.live[0]!, this.live[this.live.length - 1]!);
     return [...corners, corners[0]!];
+  }
+
+  /**
+   * The page's width ÷ height. A shape's points are fractions of the page,
+   * and the page is taller than it is wide, so a square needs this to come
+   * out square.
+   */
+  private pageAspect(): number {
+    return this.rect.height > 0 ? this.rect.width / this.rect.height : 1;
+  }
+
+  /** The shape the drag currently describes, as a stroke. */
+  private shapeStroke(id = '__shape__'): InkStroke {
+    const kind = this.options.shapeKind;
+    const start = this.shapeStart ?? this.live[0] ?? [0, 0];
+    const end = this.live[this.live.length - 1] ?? start;
+    return {
+      id,
+      color: this.options.shapeColor,
+      width: this.options.shapeWidth,
+      // Drawn corner for corner: a square's corners are the point of it.
+      sharp: true,
+      // Only a shape that closes can hold a fill.
+      ...(this.options.shapeFill && isClosed(kind)
+        ? { fill: this.options.shapeColor }
+        : {}),
+      points: shapePoints(kind, start, end, this.pageAspect()),
+    };
+  }
+
+  /**
+   * Puts the shape tool in the hand, or takes it out. While it is set, a drag
+   * draws the chosen shape between where it started and where it is now,
+   * instead of a line of ink.
+   */
+  setShapeMode(shape: boolean) {
+    this.liveShape = shape;
+    if (!shape) {
+      this.shapeStart = null;
+      this.live = [];
+    }
   }
 
   setRouter(router: ((windowPoints: InkPoint[]) => InkTarget | null) | null) {
@@ -481,6 +540,25 @@ export class HandwritingService {
   }
 
   private onBatch(points: InkPoint[], kind: 'move' | 'end', erase: boolean) {
+    // A shape is drawn between where the drag started and where it is now,
+    // redrawn from the start every frame rather than accumulated, so pulling
+    // back makes it smaller again.
+    if (this.liveShape) {
+      this.stabilizer.reset();
+      this.shapeStart ??= points[0] ?? null;
+      this.live.push(...points);
+      if (kind === 'end') {
+        const drawn = this.shapeStroke(nextStrokeId());
+        if (drawn.points.length >= 2) {
+          this.editor.addStroke(this.page, { ...drawn, points: roundPoints(drawn.points) });
+        }
+        this.shapeStart = null;
+        this.live = [];
+      }
+      this.onRender?.();
+      return;
+    }
+
     // The lasso comes first: it encloses ink whatever the pen's eraser end
     // says, since a stylus flipped over while lassoing still means to lasso.
     if (this.liveLasso) {
