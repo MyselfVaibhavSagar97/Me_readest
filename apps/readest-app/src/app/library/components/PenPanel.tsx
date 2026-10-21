@@ -15,7 +15,7 @@ import {
   type PenSettings,
 } from '@/services/notes/penSettings';
 
-const NIB_LABELS: Record<InkNib, string> = {
+const NIB_LABELS: Partial<Record<InkNib, string>> = {
   fountain: 'Fountain',
   calligraphy: 'Calligraphy',
   softpaint: 'Softpaint',
@@ -29,7 +29,7 @@ const NIB_LABELS: Record<InkNib, string> = {
  * family matter more here than five that merely exist.
  */
 const NibIcon: React.FC<{ nib: InkNib; className?: string }> = ({ nib, className }) => {
-  const shapes: Record<InkNib, React.ReactNode> = {
+  const shapes: Partial<Record<InkNib, React.ReactNode>> = {
     fountain: (
       <>
         <path d='M12 2.5 L16 12 L12 21.5 L8 12 Z' fill='currentColor' />
@@ -68,7 +68,7 @@ const NibIcon: React.FC<{ nib: InkNib; className?: string }> = ({ nib, className
   };
   return (
     <svg viewBox='0 0 24 24' className={className} aria-hidden='true'>
-      {shapes[nib]}
+      {shapes[nib] ?? null}
     </svg>
   );
 };
@@ -186,7 +186,7 @@ const PenPanel: React.FC<PenPanelProps> = ({ pen, onChange }) => {
 
   return (
     <div className='flex w-72 max-w-[85vw] flex-col gap-4'>
-      <p className='text-center text-sm font-medium'>{_(`${NIB_LABELS[pen.nib]} pen`)}</p>
+      <p className='text-center text-sm font-medium'>{_(`${NIB_LABELS[pen.nib] ?? pen.nib} pen`)}</p>
 
       <div className='flex items-end justify-between gap-1'>
         {INK_NIBS.map((nib) => {
@@ -195,9 +195,9 @@ const PenPanel: React.FC<PenPanelProps> = ({ pen, onChange }) => {
             <button
               key={nib}
               type='button'
-              aria-label={_(NIB_LABELS[nib])}
+              aria-label={_(NIB_LABELS[nib] ?? nib)}
               aria-pressed={active}
-              title={_(NIB_LABELS[nib])}
+              title={_(NIB_LABELS[nib] ?? nib)}
               onClick={() => onChange({ nib })}
               className={clsx(
                 'flex h-12 w-10 items-center justify-center rounded-lg transition-colors duration-150',

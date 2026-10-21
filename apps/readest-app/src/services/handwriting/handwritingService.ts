@@ -4,6 +4,7 @@ import {
   DEFAULT_HANDWRITING_COLOR,
   DEFAULT_HANDWRITING_WIDTH,
   simplifyPoints,
+  straightenPoints,
   roundPoints,
   type InkPoint,
   type InkStroke,
@@ -40,6 +41,11 @@ export interface HandwritingOptions {
   sensitivity: number;
   /** 0..1; how much an incoming stroke is smoothed as it is drawn. */
   stabilization: number;
+  /**
+   * Draw a straight line: the stroke becomes the line from where the pen
+   * went down to where it is now, whatever path it took between.
+   */
+  straightLine: boolean;
   /** Whether the eraser takes whole strokes or only the ink under it. */
   eraseMode: EraseMode;
   /** Which ink the eraser is allowed to touch. */
@@ -64,6 +70,7 @@ const DEFAULT_OPTIONS: HandwritingOptions = {
   nib: DEFAULT_NIB,
   sensitivity: DEFAULT_SENSITIVITY,
   stabilization: 0,
+  straightLine: false,
   eraseMode: 'stroke',
   eraseTarget: 'all',
   eraserPressure: false,
@@ -177,8 +184,17 @@ export class HandwritingService {
       width: this.options.widthFraction,
       ...this.toolField(),
       ...this.nibFields(),
-      points: this.live,
+      points: this.straighten(this.live),
     };
+  }
+
+  /**
+   * Applied to the stroke under the pen as well as the committed one, so a
+   * straight line follows the pen while it is drawn rather than snapping
+   * into place when it is lifted.
+   */
+  private straighten(points: InkPoint[]): InkPoint[] {
+    return straightenPoints(points, this.options.straightLine);
   }
 
   /** Marker ink says so; pen ink stays as it always was stored. */
@@ -470,7 +486,12 @@ export class HandwritingService {
     }
     for (const point of points) this.live.push(this.stabilizer.push(point));
     if (kind === 'end' && this.live.length) {
-      const target = this.targetOf(simplifyPoints(this.live));
+      const drawn = this.straighten(this.live);
+      // A straight line is already two points; simplifying would do nothing
+      // but could round its ends.
+      const target = this.targetOf(
+        this.options.straightLine ? drawn : simplifyPoints(drawn),
+      );
       // Undo and redo follow the page last drawn on.
       this.page = target.page;
       const pinned = this.pin(target.points, target.anchoring);
