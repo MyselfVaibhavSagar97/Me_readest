@@ -11,6 +11,10 @@ const h = vi.hoisted(() => ({
   stored: { notes: [], folders: [] } as QuickNotesData,
   /** Ink the stubbed editor reports when its Save is pressed. */
   drawn: [{ id: 's1', color: '#1a1a1a', width: 0.006, points: [[0.1, 0.2]] }] as InkStroke[],
+  /** How many times the screen has swept up unused picture files. */
+  pruned: 0,
+  /** Makes that sweep throw, as a device that refuses the directory would. */
+  pruneFails: false,
 }));
 
 vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => (key: string) => key }));
@@ -32,6 +36,16 @@ vi.mock('@/context/EnvContext', () => ({
       saveQuickNotes: async (data: QuickNotesData) => {
         h.saved.push(data);
       },
+      // The picture side of the service. The notes screen sweeps up unused
+      // picture files whenever it opens, so this has to be here even for
+      // cases about notes that hold no pictures at all.
+      pruneNoteImages: async () => {
+        h.pruned += 1;
+        if (h.pruneFails) throw new Error('cannot read the picture directory');
+        return 0;
+      },
+      noteImageURL: async (file: string) => `blob:${file}`,
+      saveNoteImage: async (_source: string, id: string) => `${id}.png`,
     },
   }),
 }));
@@ -77,6 +91,8 @@ const openNotes = async () => {
 beforeEach(() => {
   h.saved = [];
   h.stored = { notes: [], folders: [] };
+  h.pruned = 0;
+  h.pruneFails = false;
 });
 
 afterEach(() => {
@@ -85,6 +101,22 @@ afterEach(() => {
 });
 
 describe('QuickNotes', () => {
+  it('sweeps up unused picture files when the notes are read', async () => {
+    render(<QuickNotes />);
+    await waitFor(() => expect(h.pruned).toBe(1));
+  });
+
+  it('still opens when sweeping up picture files fails', async () => {
+    // Housekeeping is never allowed to matter. A device that will not let us
+    // read the picture directory must cost the person their unused files,
+    // not their notes.
+    h.pruneFails = true;
+    render(<QuickNotes />);
+    await openNotes();
+
+    expect(screen.getByRole('dialog', { name: 'Notes' })).toBeTruthy();
+  });
+
   it('offers a Notes button that opens the notes screen', async () => {
     render(<QuickNotes />);
 

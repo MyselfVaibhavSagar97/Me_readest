@@ -59,7 +59,16 @@ const QuickNotes: React.FC = () => {
       // page, or left behind by a deleted note. Done on the way in rather
       // than on the way out, so a save that never finished cannot have left
       // a note pointing at a picture that was already deleted.
-      if (appService) void appService.pruneNoteImages(loaded.notes);
+      //
+      // Housekeeping, so it is never allowed to matter: a sweep that fails,
+      // on a device that will not let us read the directory or in a build
+      // without the storage behind it, leaves the files for next time rather
+      // than taking the notes screen down with it.
+      if (appService) {
+        void Promise.resolve()
+          .then(() => appService.pruneNoteImages(loaded.notes))
+          .catch(() => {});
+      }
     });
     return () => {
       active = false;
