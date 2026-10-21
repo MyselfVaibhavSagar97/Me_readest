@@ -24,6 +24,7 @@ import PenPanel from './PenPanel';
 import EraserPanel from './EraserPanel';
 import HighlighterPanel from './HighlighterPanel';
 import LassoPanel from './LassoPanel';
+import ShapePanel from './ShapePanel';
 import PicturePanel, { PictureIcon } from './PicturePanel';
 import NoteSelection from './NoteSelection';
 import { useQuickNoteInk } from '../hooks/useQuickNoteInk';
@@ -43,6 +44,33 @@ const LassoIcon: React.FC<{ className?: string }> = ({ className }) => (
       stroke='currentColor'
       strokeWidth='1.6'
       strokeDasharray='3 2.5'
+    />
+  </svg>
+);
+
+/**
+ * The shape tool: a square, a circle and a triangle overlapping, drawn rather
+ * than borrowed. Sized in `em` like the icons beside it.
+ */
+const ShapeToolIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg viewBox='0 0 24 24' width='1em' height='1em' className={className} aria-hidden='true'>
+    <rect
+      x='3.5'
+      y='9.5'
+      width='11'
+      height='11'
+      rx='1.5'
+      fill='none'
+      stroke='currentColor'
+      strokeWidth='1.6'
+    />
+    <circle cx='16' cy='14.5' r='5.5' fill='none' stroke='currentColor' strokeWidth='1.6' />
+    <path
+      d='M12 2.5 L17.5 9.5 L6.5 9.5 Z'
+      fill='none'
+      stroke='currentColor'
+      strokeWidth='1.6'
+      strokeLinejoin='round'
     />
   </svg>
 );
@@ -78,7 +106,9 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   // Which tool has its settings dropped down, if any.
-  const [openPanel, setOpenPanel] = useState<InkTool | 'eraser' | 'lasso' | 'picture' | null>(null);
+  const [openPanel, setOpenPanel] = useState<
+    InkTool | 'eraser' | 'lasso' | 'shape' | 'picture' | null
+  >(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const ink = useQuickNoteInk(note);
   const pictures = useQuickNoteImages(note);
@@ -200,6 +230,9 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
               {openPanel === 'lasso' && (
                 <LassoPanel lasso={ink.lasso} onChange={ink.updateLasso} />
               )}
+              {openPanel === 'shape' && (
+                <ShapePanel shape={ink.shape} onChange={ink.updateShape} />
+              )}
               {openPanel === 'picture' && (
                 <PicturePanel
                   onInsertFromAlbum={() => void pictures.insertFromAlbum()}
@@ -277,6 +310,23 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
               }}
             />
           </div>
+          <div className={clsx('rounded-md', ink.shaping && 'bg-base-300 eink:border')}>
+            <AnnotationToolButton
+              showTooltip
+              tooltipText={_('Shape')}
+              Icon={ShapeToolIcon}
+              onClick={() => {
+                // Same as the pen: picking it up selects it, tapping it
+                // again opens the choice of shape.
+                if (ink.shaping) {
+                  setOpenPanel((open) => (open === 'shape' ? null : 'shape'));
+                } else {
+                  setOpenPanel(null);
+                  ink.setShaping(true);
+                }
+              }}
+            />
+          </div>
           {/* A picture is placed rather than drawn, so this opens its panel
               straight away instead of taking a turn in the hand first. */}
           <div className={clsx('rounded-md', openPanel === 'picture' && 'bg-base-300 eink:border')}>
@@ -288,6 +338,7 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
                 setOpenPanel((open) => (open === 'picture' ? null : 'picture'));
                 ink.setLassoing(false);
                 ink.setErasing(false);
+                ink.setShaping(false);
               }}
             />
           </div>

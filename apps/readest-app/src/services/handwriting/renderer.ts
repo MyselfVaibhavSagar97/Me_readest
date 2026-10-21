@@ -188,6 +188,12 @@ export const renderStrokes = (
     const smoothPath = () => {
       ctx.beginPath();
       ctx.moveTo(pts[0]![0], pts[0]![1]);
+      if (stroke.sharp) {
+        // A shape is drawn corner for corner. Smoothing a curve through the
+        // samples would round off the very corners that make it a square.
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i]![0], pts[i]![1]);
+        return;
+      }
       for (const { via, to } of pieces) {
         if (via) ctx.quadraticCurveTo(via[0], via[1], to[0], to[1]);
         else ctx.lineTo(to[0], to[1]);
@@ -204,6 +210,13 @@ export const renderStrokes = (
       if (marker) ctx.lineCap = 'butt';
       ctx.lineWidth = base;
       smoothPath();
+      // A filled shape is painted inside its own outline, so the outline is
+      // still the edge of it rather than being swallowed by the fill.
+      if (stroke.fill) {
+        ctx.fillStyle = stroke.fill;
+        ctx.fill();
+        ctx.fillStyle = stroke.color;
+      }
       ctx.stroke();
       ctx.restore();
       continue;

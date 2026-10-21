@@ -78,6 +78,18 @@ export interface InkStroke {
   page?: number;
   /** In memory only: the drawing session (ink annotation id) it belongs to. */
   session?: string;
+  /**
+   * Draw the points exactly, corner for corner, instead of smoothing a curve
+   * through them. Set on a drawn shape, whose square corners are the point
+   * of it; absent on handwriting, which is smoothed as it always was.
+   */
+  sharp?: boolean;
+  /**
+   * Fill the stroke's path with this colour before drawing its outline. Set
+   * on a closed shape with fill turned on; absent everywhere else, so no ink
+   * drawn before shapes existed is filled.
+   */
+  fill?: string;
   points: InkPoint[];
 }
 
