@@ -125,6 +125,14 @@ export const roundPoints = (points: InkPoint[]): InkPoint[] =>
   );
 
 /**
+ * The points as a stroke should be drawn: the whole path, or just its two
+ * ends when a straight line was asked for. A path of fewer than two points
+ * has no ends to draw between, so it passes through.
+ */
+export const straightenPoints = (points: InkPoint[], straight: boolean): InkPoint[] =>
+  !straight || points.length < 2 ? points : [points[0]!, points[points.length - 1]!];
+
+/**
  * Ramer–Douglas–Peucker simplification, one stroke at a time.
  *
  * Applied as each stroke is committed: pointer input delivers every coalesced

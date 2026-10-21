@@ -1,6 +1,14 @@
 import type { InkStroke } from './model';
 import type { PageRect } from './coords';
-import { DEFAULT_NIB, nibAlpha, nibIsSoft, nibRadius, nibVaries } from './nibs';
+import {
+  DEFAULT_NIB,
+  LEGACY_HIGHLIGHTER_TIP,
+  nibAlpha,
+  nibIsSoft,
+  nibRadius,
+  nibVaries,
+  pressureScale,
+} from './nibs';
 
 /**
  * Ink drawn before notes offered a choice of pen, and all of the reader's
@@ -146,7 +154,9 @@ export const renderStrokes = (
     ctx.fillStyle = stroke.color;
 
     const marker = stroke.tool === 'marker';
-    const nib = stroke.nib ?? DEFAULT_NIB;
+    // A highlighter stroke with no tip recorded is the even band the marker
+    // drew before tips existed, not a pen's round nib.
+    const nib = stroke.nib ?? (marker ? LEGACY_HIGHLIGHTER_TIP : DEFAULT_NIB);
     const sensitivity = stroke.sensitivity ?? DEFAULT_SENSITIVITY;
     const alpha = marker ? MARKER_OPACITY : nibAlpha(nib);
 
@@ -154,8 +164,9 @@ export const renderStrokes = (
       ctx.save();
       ctx.globalAlpha = alpha;
       ctx.beginPath();
-      // A dot has no direction to hold a flat nib against, so it is round.
-      const radius = marker ? base / 2 : nibRadius(nib, base, pts[0]![2], 0, sensitivity);
+      // A dot has no direction to hold a flat nib against, so it is round:
+      // pressure sizes it, direction does not.
+      const radius = (base * pressureScale(nib, pts[0]![2], sensitivity)) / 2;
       ctx.arc(pts[0]![0], pts[0]![1], radius, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
@@ -183,23 +194,14 @@ export const renderStrokes = (
       }
     };
 
-    // A marker is one translucent band of even width with flat ends, stroked
-    // as a single path so it does not darken where it crosses itself.
-    if (marker) {
-      ctx.save();
-      ctx.globalAlpha = MARKER_OPACITY;
-      ctx.lineCap = 'butt';
-      ctx.lineWidth = base;
-      smoothPath();
-      ctx.stroke();
-      ctx.restore();
-      continue;
-    }
-
     const hasPressure = pts.some((p) => p[2] !== undefined);
     if (!nibVaries(nib, sensitivity, hasPressure)) {
+      // One band of even width, stroked as a single path so a translucent
+      // highlighter does not darken where it crosses itself.
       ctx.save();
       ctx.globalAlpha = alpha;
+      // A highlighter starts and stops square, like the felt tip it is.
+      if (marker) ctx.lineCap = 'butt';
       ctx.lineWidth = base;
       smoothPath();
       ctx.stroke();

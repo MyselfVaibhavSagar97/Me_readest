@@ -18,8 +18,8 @@ import { useThemeStore } from '@/store/themeStore';
 import type { InkTool } from '@/services/handwriting/model';
 import { QUICK_NOTE_ASPECT, type QuickNote } from '@/types/notes';
 import AnnotationToolButton from '@/app/reader/components/annotator/AnnotationToolButton';
-import HandwritingOptions from '@/app/reader/components/handwriting/HandwritingOptions';
 import PenPanel from './PenPanel';
+import HighlighterPanel from './HighlighterPanel';
 import { useQuickNoteInk } from '../hooks/useQuickNoteInk';
 
 /**
@@ -119,13 +119,6 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
     onClose();
   }, [onClose, persist]);
 
-  const choose =
-    <T,>(select: (value: T) => void) =>
-    (value: T) => {
-      select(value);
-      setOpenPanel(null);
-    };
-
   return (
     <div
       role='dialog'
@@ -159,12 +152,9 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
               {openPanel === 'pen' ? (
                 <PenPanel pen={ink.pen} onChange={ink.updatePen} />
               ) : (
-                <HandwritingOptions
-                  tool={ink.tool}
-                  color={ink.color}
-                  width={ink.width}
-                  onSelectColor={choose(ink.selectColor)}
-                  onSelectWidth={choose(ink.selectWidth)}
+                <HighlighterPanel
+                  highlighter={ink.highlighter}
+                  onChange={ink.updateHighlighter}
                 />
               )}
             </div>

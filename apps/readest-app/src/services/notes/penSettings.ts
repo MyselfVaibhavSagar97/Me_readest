@@ -1,4 +1,8 @@
-import { DEFAULT_NIB, type InkNib } from '@/services/handwriting/nibs';
+import {
+  DEFAULT_HIGHLIGHTER_TIP,
+  DEFAULT_NIB,
+  type InkNib,
+} from '@/services/handwriting/nibs';
 
 /**
  * A note page is A4, so a pen's width can be quoted in millimetres rather
@@ -44,3 +48,43 @@ export const DEFAULT_PEN: PenSettings = {
 
 /** The colours the panel offers, in swatch order; the first opens a picker. */
 export const PEN_COLORS = ['#1a1a1a', '#c62828', '#1f6feb', '#00796b', '#e3a008'] as const;
+
+/** Everything the highlighter panel sets. */
+export interface HighlighterSettings {
+  /** Which tip: a flat chisel, or a round fine one. */
+  tip: InkNib;
+  /** Band width in millimetres on the page. */
+  thicknessMm: number;
+  /**
+   * Draw a straight line from where the pen goes down to where it lifts,
+   * for underlining a line of text without a steady hand.
+   */
+  straightLine: boolean;
+  color: string;
+}
+
+/** A highlighter runs from a thin underline to a band several lines deep. */
+export const MIN_HIGHLIGHTER_MM = 1;
+export const MAX_HIGHLIGHTER_MM = 20;
+export const HIGHLIGHTER_STEP_MM = 0.5;
+
+export const roundHighlighterMm = (mm: number) =>
+  Math.round(
+    Math.min(MAX_HIGHLIGHTER_MM, Math.max(MIN_HIGHLIGHTER_MM, mm)) / HIGHLIGHTER_STEP_MM,
+  ) * HIGHLIGHTER_STEP_MM;
+
+export const DEFAULT_HIGHLIGHTER: HighlighterSettings = {
+  tip: DEFAULT_HIGHLIGHTER_TIP,
+  thicknessMm: 5,
+  straightLine: false,
+  color: '#facc15',
+};
+
+/** Highlighter colours, in swatch order; the first opens a picker. */
+export const HIGHLIGHTER_COLORS = [
+  '#facc15',
+  '#fb923c',
+  '#4ade80',
+  '#60a5fa',
+  '#f472b6',
+] as const;
