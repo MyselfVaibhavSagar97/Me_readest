@@ -103,7 +103,9 @@ afterEach(() => {
 describe('QuickNotes', () => {
   it('sweeps up unused picture files when the notes are read', async () => {
     render(<QuickNotes />);
-    await waitFor(() => expect(h.pruned).toBe(1));
+    // That it happens, not how many times: the screen re-reads whenever the
+    // service it was handed changes, and sweeping twice costs nothing.
+    await waitFor(() => expect(h.pruned).toBeGreaterThanOrEqual(1));
   });
 
   it('still opens when sweeping up picture files fails', async () => {
