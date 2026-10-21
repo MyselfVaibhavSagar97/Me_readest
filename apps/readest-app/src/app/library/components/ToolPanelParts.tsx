@@ -102,6 +102,8 @@ export const SwitchRow: React.FC<SwitchRowProps> = ({
       type='checkbox'
       role='switch'
       aria-label={label}
+      // A checkbox announces itself as checked; a switch has to say so.
+      aria-checked={checked}
       checked={checked}
       onChange={(event) => onChange(event.target.checked)}
       className='toggle toggle-sm shrink-0'

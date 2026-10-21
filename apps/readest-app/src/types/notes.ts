@@ -1,7 +1,11 @@
 import type { InkStroke } from '@/services/handwriting/model';
 
-/** Width ÷ height of a quick note's page. A4 portrait, the shape of paper. */
-export const QUICK_NOTE_ASPECT = 1 / 1.414;
+/**
+ * Width ÷ height of a quick note's page. A4 portrait, the shape of paper,
+ * which is exactly 1:√2 — that is what makes folding a sheet in half give
+ * the next size down.
+ */
+export const QUICK_NOTE_ASPECT = 1 / Math.SQRT2;
 
 /**
  * A standalone handwritten note: ink on its own blank page, with no book
