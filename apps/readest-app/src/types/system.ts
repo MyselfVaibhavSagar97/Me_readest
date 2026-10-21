@@ -1,6 +1,6 @@
 import { SystemSettings } from './settings';
 import type { RssFeed } from '@/types/rss';
-import type { QuickNote } from '@/types/notes';
+import type { QuickNotesData } from '@/types/notes';
 import { Book, BookConfig, BookContent, ImportBookOptions, ViewSettings } from './book';
 import { BookMetadata } from '@/libs/document';
 import type { BookNav } from '@/services/nav';
@@ -249,8 +249,8 @@ export interface AppService {
   resolveNativeBookFilePath(book: Book): Promise<string | null>;
   loadFeeds(): Promise<RssFeed[]>;
   saveFeeds(feeds: RssFeed[]): Promise<void>;
-  loadQuickNotes(): Promise<QuickNote[]>;
-  saveQuickNotes(notes: QuickNote[]): Promise<void>;
+  loadQuickNotes(): Promise<QuickNotesData>;
+  saveQuickNotes(data: QuickNotesData): Promise<void>;
   loadLibraryBooks(): Promise<Book[]>;
   requestCoverThumbnail(book: Book): void;
   saveLibraryBooks(books: Book[], options?: SaveLibraryBooksOptions): Promise<void>;

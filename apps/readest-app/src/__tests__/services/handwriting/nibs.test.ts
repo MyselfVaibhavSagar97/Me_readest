@@ -1,8 +1,11 @@
 import { describe, it, expect } from 'vitest';
 
 import {
+  DEFAULT_HIGHLIGHTER_TIP,
   DEFAULT_NIB,
+  HIGHLIGHTER_TIPS,
   INK_NIBS,
+  LEGACY_HIGHLIGHTER_TIP,
   directionScale,
   nibAlpha,
   nibRadius,
@@ -116,5 +119,49 @@ describe('nibs', () => {
   it('offers five nibs, the default among them', () => {
     expect(INK_NIBS).toHaveLength(5);
     expect(INK_NIBS).toContain(DEFAULT_NIB);
+  });
+});
+
+describe('highlighter tips', () => {
+  it('ignores pressure however hard the highlighter is pressed', () => {
+    for (const tip of HIGHLIGHTER_TIPS) {
+      expect(pressureScale(tip, 0, 1)).toBe(1);
+      expect(pressureScale(tip, 1, 1)).toBe(1);
+    }
+  });
+
+  it('draws a chisel broad across its edge and fine along it', () => {
+    const along = directionScale('chisel', -Math.PI / 4);
+    const across = directionScale('chisel', Math.PI / 4);
+
+    expect(along).toBeLessThan(0.2);
+    expect(across).toBeCloseTo(1, 10);
+  });
+
+  it('draws a fine tip the same in every direction', () => {
+    for (const angle of [0, Math.PI / 4, Math.PI / 2, 1.9]) {
+      expect(directionScale('fine', angle)).toBe(1);
+    }
+  });
+
+  it('varies a chisel always, and a fine tip never', () => {
+    expect(nibVaries('chisel', 0, false)).toBe(true);
+    expect(nibVaries('fine', 1, true)).toBe(false);
+  });
+
+  it('leaves highlighter ink drawn before tips existed exactly as it was', () => {
+    // Marker strokes carry no tip. They must keep the even, square-ended
+    // band the renderer always drew, not become a chisel or start answering
+    // to the pressure a stylus happens to report.
+    expect(LEGACY_HIGHLIGHTER_TIP).toBe('fine');
+    expect(nibVaries(LEGACY_HIGHLIGHTER_TIP, 1, true)).toBe(false);
+    expect(pressureScale(LEGACY_HIGHLIGHTER_TIP, 0.9, 1)).toBe(1);
+  });
+
+  it('keeps the tips out of the pen panel, and the pens out of the tips', () => {
+    expect(INK_NIBS).toHaveLength(5);
+    for (const tip of HIGHLIGHTER_TIPS) expect(INK_NIBS).not.toContain(tip);
+    expect(HIGHLIGHTER_TIPS).toContain(DEFAULT_HIGHLIGHTER_TIP);
+    expect(HIGHLIGHTER_TIPS).not.toContain(DEFAULT_NIB);
   });
 });

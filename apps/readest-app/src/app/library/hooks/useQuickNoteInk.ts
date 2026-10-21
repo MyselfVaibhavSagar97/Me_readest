@@ -3,17 +3,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { HandwritingEditor } from '@/services/handwriting/editor';
 import { HandwritingService } from '@/services/handwriting/handwritingService';
 import { renderStrokes } from '@/services/handwriting/renderer';
+import { type InkStroke, type InkTool } from '@/services/handwriting/model';
 import {
-  DEFAULT_MARKER_COLOR,
-  DEFAULT_MARKER_WIDTH,
-  type InkStroke,
-  type InkTool,
-} from '@/services/handwriting/model';
-import {
+  DEFAULT_ERASER,
+  DEFAULT_HIGHLIGHTER,
   DEFAULT_PEN,
-  fractionToMm,
+  eraserRadiusFraction,
   mmToFraction,
-  roundThicknessMm,
+  type EraserSettings,
+  type HighlighterSettings,
   type PenSettings,
 } from '@/services/notes/penSettings';
 import type { PageRect } from '@/services/handwriting/coords';
@@ -63,17 +61,17 @@ export const useQuickNoteInk = (note: QuickNote) => {
 
   const [tool, setTool] = useState<InkTool>('pen');
   const [pen, setPen] = useState<PenSettings>(DEFAULT_PEN);
-  const [markerColor, setMarkerColor] = useState(DEFAULT_MARKER_COLOR);
-  const [markerWidth, setMarkerWidth] = useState<number>(DEFAULT_MARKER_WIDTH);
+  const [eraser, setEraser] = useState<EraserSettings>(DEFAULT_ERASER);
+  const [highlighter, setHighlighter] = useState<HighlighterSettings>(DEFAULT_HIGHLIGHTER);
   const [erasing, setErasing] = useState(false);
   const [penOnly, setPenOnlyState] = useState(false);
   const [revision, setRevision] = useState(0);
 
   const marker = tool === 'marker';
-  const color = marker ? markerColor : pen.color;
-  // The pen is set in millimetres on an A4 page; the engine works in
-  // fractions of the page, which is what survives a change of screen.
-  const width = marker ? markerWidth : mmToFraction(pen.thicknessMm);
+  const color = marker ? highlighter.color : pen.color;
+  // Both are set in millimetres on an A4 page; the engine works in fractions
+  // of the page, which is what survives a change of screen.
+  const width = mmToFraction(marker ? highlighter.thicknessMm : pen.thicknessMm);
 
   // The remembered stylus-only choice, read on the client only: localStorage
   // does not exist while the page is prerendered.
@@ -117,14 +115,22 @@ export const useQuickNoteInk = (note: QuickNote) => {
     color,
     widthFraction: width,
     penOnly,
-    nib: pen.nib,
+    nib: marker ? highlighter.tip : pen.nib,
     sensitivity: pen.sensitivity,
     stabilization: pen.stabilization,
+    // Only the highlighter offers it, so the pen is never straightened.
+    straightLine: marker && highlighter.straightLine,
+    eraseRadiusFraction: eraserRadiusFraction(eraser.sizeMm),
+    eraseMode: eraser.mode,
+    eraseTarget: eraser.target,
+    eraserPressure: eraser.pressure,
   };
   const optionsRef = useRef(engineOptions);
   optionsRef.current = engineOptions;
   const erasingRef = useRef(erasing);
   erasingRef.current = erasing;
+  const autoDeselectRef = useRef(eraser.autoDeselect);
+  autoDeselectRef.current = eraser.autoDeselect;
 
   /** Builds the drawing session once both the canvas and the page are known. */
   const ensureAttached = useCallback(() => {
@@ -137,6 +143,9 @@ export const useQuickNoteInk = (note: QuickNote) => {
     // radius from the pen width, so the eraser always matches the tool.
     service.setOptions(optionsRef.current);
     service.setEraseMode(erasingRef.current);
+    service.onEraseEnd(() => {
+      if (autoDeselectRef.current) setErasing(false);
+    });
     serviceRef.current = service;
     void service.attach(el).then(paint);
   }, [editor, paint]);
@@ -179,11 +188,31 @@ export const useQuickNoteInk = (note: QuickNote) => {
       color,
       widthFraction: width,
       penOnly,
-      nib: pen.nib,
+      nib: marker ? highlighter.tip : pen.nib,
       sensitivity: pen.sensitivity,
       stabilization: pen.stabilization,
+      straightLine: marker && highlighter.straightLine,
+      eraseRadiusFraction: eraserRadiusFraction(eraser.sizeMm),
+      eraseMode: eraser.mode,
+      eraseTarget: eraser.target,
+      eraserPressure: eraser.pressure,
     });
-  }, [tool, color, width, penOnly, pen.nib, pen.sensitivity, pen.stabilization]);
+  }, [
+    tool,
+    marker,
+    color,
+    width,
+    penOnly,
+    pen.nib,
+    pen.sensitivity,
+    pen.stabilization,
+    highlighter.tip,
+    highlighter.straightLine,
+    eraser.sizeMm,
+    eraser.mode,
+    eraser.target,
+    eraser.pressure,
+  ]);
 
   useEffect(() => {
     serviceRef.current?.setEraseMode(erasing);
@@ -194,24 +223,27 @@ export const useQuickNoteInk = (note: QuickNote) => {
     setTool(next);
   }, []);
 
+  /** Changes one or more of the eraser's settings, leaving the rest alone. */
+  const updateEraser = useCallback(
+    (patch: Partial<EraserSettings>) => setEraser((current) => ({ ...current, ...patch })),
+    [],
+  );
+
   /** Changes one or more of the pen's settings, leaving the rest alone. */
   const updatePen = useCallback(
     (patch: Partial<PenSettings>) => setPen((current) => ({ ...current, ...patch })),
     [],
   );
 
-  const selectColor = useCallback(
-    (next: string) => (marker ? setMarkerColor(next) : updatePen({ color: next })),
-    [marker, updatePen],
+  /** Changes one or more of the highlighter's settings, leaving the rest. */
+  const updateHighlighter = useCallback(
+    (patch: Partial<HighlighterSettings>) =>
+      setHighlighter((current) => ({ ...current, ...patch })),
+    [],
   );
 
-  const selectWidth = useCallback(
-    (next: number) =>
-      marker
-        ? setMarkerWidth(next)
-        : updatePen({ thicknessMm: roundThicknessMm(fractionToMm(next)) }),
-    [marker, updatePen],
-  );
+  /** Rubs out everything on the page the editor is showing. */
+  const clearPage = useCallback(() => serviceRef.current?.clear(), []);
 
   const setPenOnly = useCallback((next: boolean) => {
     setPenOnlyState(next);
@@ -228,10 +260,13 @@ export const useQuickNoteInk = (note: QuickNote) => {
     selectTool,
     color,
     width,
-    selectColor,
-    selectWidth,
     pen,
     updatePen,
+    highlighter,
+    updateHighlighter,
+    eraser,
+    updateEraser,
+    clearPage,
     erasing,
     setErasing,
     penOnly,

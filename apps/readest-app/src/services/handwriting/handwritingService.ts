@@ -1,9 +1,10 @@
 import { detectPenBackend, type PenBackend } from './capabilities';
-import { HandwritingEditor } from './editor';
+import { HandwritingEditor, type EraseMode, type EraseTarget } from './editor';
 import {
   DEFAULT_HANDWRITING_COLOR,
   DEFAULT_HANDWRITING_WIDTH,
   simplifyPoints,
+  straightenPoints,
   roundPoints,
   type InkPoint,
   type InkStroke,
@@ -12,6 +13,7 @@ import {
 import { screenToPage, type PageRect } from './coords';
 import { DEFAULT_NIB, type InkNib } from './nibs';
 import { StrokeStabilizer } from './stabilizer';
+import { eraserPressureScale } from './pointEraser';
 import type { InkAnchoring } from './anchor';
 
 /** Where a stroke drawn over a scrolled view belongs. */
@@ -39,6 +41,17 @@ export interface HandwritingOptions {
   sensitivity: number;
   /** 0..1; how much an incoming stroke is smoothed as it is drawn. */
   stabilization: number;
+  /**
+   * Draw a straight line: the stroke becomes the line from where the pen
+   * went down to where it is now, whatever path it took between.
+   */
+  straightLine: boolean;
+  /** Whether the eraser takes whole strokes or only the ink under it. */
+  eraseMode: EraseMode;
+  /** Which ink the eraser is allowed to touch. */
+  eraseTarget: EraseTarget;
+  /** Whether a firmer press rubs out wider. */
+  eraserPressure: boolean;
 }
 
 /**
@@ -57,6 +70,10 @@ const DEFAULT_OPTIONS: HandwritingOptions = {
   nib: DEFAULT_NIB,
   sensitivity: DEFAULT_SENSITIVITY,
   stabilization: 0,
+  straightLine: false,
+  eraseMode: 'stroke',
+  eraseTarget: 'all',
+  eraserPressure: false,
 };
 
 /**
@@ -121,6 +138,8 @@ export class HandwritingService {
   private eraseTail: InkPoint | null = null;
   private rect: PageRect;
   private onRender: (() => void) | null = null;
+  /** Told when an erase gesture finishes, so a caller can put the tool back. */
+  private onErased: (() => void) | null = null;
 
   constructor(
     editor: HandwritingEditor,
@@ -136,8 +155,22 @@ export class HandwritingService {
 
   /** The in-progress stroke alone, for views that render committed ink per page. */
   liveStrokes(): InkStroke[] {
-    if (this.live.length === 0 || this.liveErase) return [];
-    return [this.liveStroke()];
+    if (this.live.length === 0) return [];
+    if (!this.liveErase) return [this.liveStroke()];
+    // A lasso has to be visible while it is drawn, or there is no telling
+    // what it is about to take.
+    return this.options.eraseMode === 'lasso' ? [this.lassoStroke()] : [];
+  }
+
+  /** The loop being drawn round ink to erase it: a thin, faint outline. */
+  private lassoStroke(): InkStroke {
+    return {
+      id: '__lasso__',
+      color: '#9ca3af',
+      width: 0.002,
+      nib: 'ballpoint',
+      points: this.live,
+    };
   }
 
   setRouter(router: ((windowPoints: InkPoint[]) => InkTarget | null) | null) {
@@ -151,8 +184,17 @@ export class HandwritingService {
       width: this.options.widthFraction,
       ...this.toolField(),
       ...this.nibFields(),
-      points: this.live,
+      points: this.straighten(this.live),
     };
+  }
+
+  /**
+   * Applied to the stroke under the pen as well as the committed one, so a
+   * straight line follows the pen while it is drawn rather than snapping
+   * into place when it is lifted.
+   */
+  private straighten(points: InkPoint[]): InkPoint[] {
+    return straightenPoints(points, this.options.straightLine);
   }
 
   /** Marker ink says so; pen ink stays as it always was stored. */
@@ -180,13 +222,15 @@ export class HandwritingService {
     const committed = this.editor
       .strokes(this.page)
       .flatMap((stroke) => (this.place(stroke) ?? []).map((points) => ({ ...stroke, points })));
-    if (this.live.length === 0) return [...committed];
-    if (this.liveErase) return [...committed];
-    return [...committed, this.liveStroke()];
+    return [...committed, ...this.liveStrokes()];
   }
 
   onNeedsRender(fn: () => void) {
     this.onRender = fn;
+  }
+
+  onEraseEnd(fn: () => void) {
+    this.onErased = fn;
   }
 
   updateRect(rect: PageRect) {
@@ -209,10 +253,14 @@ export class HandwritingService {
     this.options = {
       ...this.options,
       ...options,
-      eraseRadiusFraction: Math.max(
-        width * (tool === 'marker' ? 1 : ERASER_WIDTH_RATIO),
-        DEFAULT_OPTIONS.eraseRadiusFraction,
-      ),
+      // An eraser sized by hand wins; otherwise it tracks the tool, as a few
+      // pen widths or one marker band.
+      eraseRadiusFraction:
+        options.eraseRadiusFraction ??
+        Math.max(
+          width * (tool === 'marker' ? 1 : ERASER_WIDTH_RATIO),
+          DEFAULT_OPTIONS.eraseRadiusFraction,
+        ),
     };
     this.pointer.setPenOnly(this.options.penOnly);
     this.stabilizer.setStrength(this.options.stabilization);
@@ -390,26 +438,60 @@ export class HandwritingService {
 
   private onBatch(points: InkPoint[], kind: 'move' | 'end', erase: boolean) {
     if (erase || this.liveErase) {
+      // The eraser follows the hand exactly; only drawing is smoothed.
+      this.stabilizer.reset();
+
+      if (this.options.eraseMode === 'lasso') {
+        // A loop is only a loop once it closes, so the points are gathered
+        // and the erase happens once, when the hand lifts.
+        this.live.push(...points);
+        if (kind === 'end') {
+          const target = this.targetOf(this.live);
+          this.editor.erase(
+            target.page,
+            target.points,
+            0,
+            this.placeWith(target.anchoring),
+            { mode: 'lasso', target: this.options.eraseTarget },
+          );
+          this.live = [];
+          this.onErased?.();
+        }
+        this.onRender?.();
+        return;
+      }
+
       const path = this.eraseTail ? [this.eraseTail, ...points] : points;
       if (path.length) {
         const target = this.targetOf(path);
+        // A pressure-sensitive eraser rubs wider the harder it is pressed,
+        // taken from the last sample in this batch.
+        const pressure = eraserPressureScale(
+          path[path.length - 1]?.[2],
+          this.options.eraserPressure,
+        );
         this.editor.erase(
           target.page,
           target.points,
-          this.options.eraseRadiusFraction * target.scale,
+          this.options.eraseRadiusFraction * target.scale * pressure,
           this.placeWith(target.anchoring),
+          { mode: this.options.eraseMode, target: this.options.eraseTarget },
         );
       }
       this.eraseTail = kind === 'end' ? null : (path[path.length - 1] ?? null);
       this.live = [];
-      // The eraser follows the hand exactly; only drawing is smoothed.
-      this.stabilizer.reset();
+      if (kind === 'end') this.onErased?.();
       this.onRender?.();
       return;
     }
     for (const point of points) this.live.push(this.stabilizer.push(point));
     if (kind === 'end' && this.live.length) {
-      const target = this.targetOf(simplifyPoints(this.live));
+      const drawn = this.straighten(this.live);
+      // A straight line is already two points; simplifying would do nothing
+      // but could round its ends.
+      const target = this.targetOf(
+        this.options.straightLine ? drawn : simplifyPoints(drawn),
+      );
       // Undo and redo follow the page last drawn on.
       this.page = target.page;
       const pinned = this.pin(target.points, target.anchoring);
