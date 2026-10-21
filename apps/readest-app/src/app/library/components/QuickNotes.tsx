@@ -55,11 +55,16 @@ const QuickNotes: React.FC = () => {
     let active = true;
     void ensureLoaded().then((loaded) => {
       if (active) setData(loaded);
+      // Sweep up picture files no note points at any more — one taken off a
+      // page, or left behind by a deleted note. Done on the way in rather
+      // than on the way out, so a save that never finished cannot have left
+      // a note pointing at a picture that was already deleted.
+      if (appService) void appService.pruneNoteImages(loaded.notes);
     });
     return () => {
       active = false;
     };
-  }, [ensureLoaded]);
+  }, [appService, ensureLoaded]);
 
   const persist = useCallback(
     async (update: (previous: QuickNotesData) => QuickNotesData) => {
@@ -86,8 +91,9 @@ const QuickNotes: React.FC = () => {
   const handlePersistNote = useCallback(
     (note: QuickNote) => {
       // An untouched new note is not worth keeping, and storing it would
-      // leave a blank card on the notes screen.
-      if (note.ink.length === 0) return;
+      // leave a blank card on the notes screen. A note holding only a
+      // picture has something on it, so it counts.
+      if (note.ink.length === 0 && (note.images?.length ?? 0) === 0) return;
       void persist((previous) => upsertNote(previous, note));
     },
     [persist],

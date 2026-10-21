@@ -1,6 +1,6 @@
 import { SystemSettings } from './settings';
 import type { RssFeed } from '@/types/rss';
-import type { QuickNotesData } from '@/types/notes';
+import type { QuickNote, QuickNotesData } from '@/types/notes';
 import { Book, BookConfig, BookContent, ImportBookOptions, ViewSettings } from './book';
 import { BookMetadata } from '@/libs/document';
 import type { BookNav } from '@/services/nav';
@@ -251,6 +251,9 @@ export interface AppService {
   saveFeeds(feeds: RssFeed[]): Promise<void>;
   loadQuickNotes(): Promise<QuickNotesData>;
   saveQuickNotes(data: QuickNotesData): Promise<void>;
+  saveNoteImage(sourcePath: string, id: string): Promise<string>;
+  noteImageURL(file: string): Promise<string>;
+  pruneNoteImages(notes: readonly QuickNote[]): Promise<number>;
   loadLibraryBooks(): Promise<Book[]>;
   requestCoverThumbnail(book: Book): void;
   saveLibraryBooks(books: Book[], options?: SaveLibraryBooksOptions): Promise<void>;
