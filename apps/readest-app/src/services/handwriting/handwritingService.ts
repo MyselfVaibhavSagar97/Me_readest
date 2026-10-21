@@ -14,6 +14,13 @@ import { screenToPage, type PageRect } from './coords';
 import { DEFAULT_NIB, type InkNib } from './nibs';
 import { StrokeStabilizer } from './stabilizer';
 import { eraserPressureScale } from './pointEraser';
+import {
+  SELECTABLE_KINDS,
+  rectPath,
+  selectStrokes,
+  type LassoShape,
+  type SelectableKind,
+} from './selection';
 import type { InkAnchoring } from './anchor';
 
 /** Where a stroke drawn over a scrolled view belongs. */
@@ -52,6 +59,10 @@ export interface HandwritingOptions {
   eraseTarget: EraseTarget;
   /** Whether a firmer press rubs out wider. */
   eraserPressure: boolean;
+  /** How the lasso decides what it caught. */
+  lassoShape: LassoShape;
+  /** Which kinds of ink the lasso is allowed to pick up. */
+  lassoKinds: readonly SelectableKind[];
 }
 
 /**
@@ -74,6 +85,8 @@ const DEFAULT_OPTIONS: HandwritingOptions = {
   eraseMode: 'stroke',
   eraseTarget: 'all',
   eraserPressure: false,
+  lassoShape: 'free',
+  lassoKinds: SELECTABLE_KINDS,
 };
 
 /**
@@ -133,6 +146,8 @@ export class HandwritingService {
   private boox = new BooxHandwritingBackend();
   private live: InkPoint[] = [];
   private liveErase = false;
+  /** The lasso is picking ink up rather than drawing or rubbing out. */
+  private liveLasso = false;
   private stabilizer = new StrokeStabilizer();
   /** Last eraser sample, so consecutive batches erase along a connected path. */
   private eraseTail: InkPoint | null = null;
@@ -140,6 +155,8 @@ export class HandwritingService {
   private onRender: (() => void) | null = null;
   /** Told when an erase gesture finishes, so a caller can put the tool back. */
   private onErased: (() => void) | null = null;
+  /** Told what a finished lasso caught, by stroke id. */
+  private onSelected: ((ids: string[]) => void) | null = null;
 
   constructor(
     editor: HandwritingEditor,
@@ -156,21 +173,34 @@ export class HandwritingService {
   /** The in-progress stroke alone, for views that render committed ink per page. */
   liveStrokes(): InkStroke[] {
     if (this.live.length === 0) return [];
-    if (!this.liveErase) return [this.liveStroke()];
     // A lasso has to be visible while it is drawn, or there is no telling
     // what it is about to take.
-    return this.options.eraseMode === 'lasso' ? [this.lassoStroke()] : [];
+    if (this.liveLasso) return [this.lassoStroke(this.lassoPath())];
+    if (!this.liveErase) return [this.liveStroke()];
+    return this.options.eraseMode === 'lasso' ? [this.lassoStroke(this.live)] : [];
   }
 
-  /** The loop being drawn round ink to erase it: a thin, faint outline. */
-  private lassoStroke(): InkStroke {
+  /** The loop being drawn round ink: a thin, faint outline. */
+  private lassoStroke(points: InkPoint[]): InkStroke {
     return {
       id: '__lasso__',
       color: '#9ca3af',
       width: 0.002,
       nib: 'ballpoint',
-      points: this.live,
+      points,
     };
+  }
+
+  /**
+   * The loop the lasso is enclosing: the path the hand took, or, for the
+   * rectangular lasso, the box between where it went down and where it is
+   * now. The rectangle is closed back to its first corner so the outline
+   * drawn on screen is the whole box rather than three of its sides.
+   */
+  private lassoPath(): InkPoint[] {
+    if (this.options.lassoShape !== 'rect' || this.live.length < 2) return this.live;
+    const corners = rectPath(this.live[0]!, this.live[this.live.length - 1]!);
+    return [...corners, corners[0]!];
   }
 
   setRouter(router: ((windowPoints: InkPoint[]) => InkTarget | null) | null) {
@@ -393,6 +423,20 @@ export class HandwritingService {
     this.liveErase = erase;
   }
 
+  /**
+   * Puts the lasso in the hand, or takes it out. While it is set, a drag
+   * encloses ink instead of drawing or rubbing it out; what it caught is
+   * reported through `onSelect`, and acting on that is the caller's to do.
+   */
+  setLassoMode(lasso: boolean) {
+    this.liveLasso = lasso;
+    if (!lasso) this.live = [];
+  }
+
+  onSelect(fn: ((ids: string[]) => void) | null) {
+    this.onSelected = fn;
+  }
+
   undo() {
     this.editor.undo(this.page);
     this.onRender?.();
@@ -437,6 +481,23 @@ export class HandwritingService {
   }
 
   private onBatch(points: InkPoint[], kind: 'move' | 'end', erase: boolean) {
+    // The lasso comes first: it encloses ink whatever the pen's eraser end
+    // says, since a stylus flipped over while lassoing still means to lasso.
+    if (this.liveLasso) {
+      this.stabilizer.reset();
+      this.live.push(...points);
+      if (kind === 'end') {
+        const caught = selectStrokes(this.editor.strokes(this.page), this.lassoPath(), {
+          shape: this.options.lassoShape,
+          kinds: this.options.lassoKinds,
+        });
+        this.live = [];
+        this.onSelected?.(caught);
+      }
+      this.onRender?.();
+      return;
+    }
+
     if (erase || this.liveErase) {
       // The eraser follows the hand exactly; only drawing is smoothed.
       this.stabilizer.reset();

@@ -81,6 +81,8 @@ const touches = (stroke: InkStroke, placed: InkPoint[][], pathSegs: Seg[], radiu
 export class HandwritingEditor {
   private pages = new Map<string, PageState>();
   private listeners = new Set<() => void>();
+  /** The drag whose frames are folding into one undo entry; see `commit`. */
+  private gesture: string | undefined;
 
   constructor(pages?: Record<string, InkPage>) {
     for (const [key, page] of Object.entries(pages ?? {})) {
@@ -105,6 +107,44 @@ export class HandwritingEditor {
   addStroke(page: string, stroke: InkStroke) {
     if (stroke.points.length === 0) return;
     this.commit(page, [...this.strokes(page), stroke]);
+  }
+
+  /** Adds several strokes at once — pasting a copy — as one undoable step. */
+  addStrokes(page: string, strokes: readonly InkStroke[]) {
+    const wanted = strokes.filter((stroke) => stroke.points.length > 0);
+    if (wanted.length === 0) return;
+    this.commit(page, [...this.strokes(page), ...wanted]);
+  }
+
+  /**
+   * Puts the given strokes in place of the ones carrying their ids, leaving
+   * every other stroke and the drawing order alone. This is how a selection
+   * moves and resizes: the ids stay the same, only the points change.
+   *
+   * `gesture` is what makes a drag undoable in one step. A run of calls
+   * sharing it keeps the single undo entry taken at the start, so dragging
+   * ink across the page and then undoing puts it back where it began rather
+   * than walking it back one frame at a time. Pass a fresh value per drag.
+   */
+  replaceStrokes(page: string, strokes: readonly InkStroke[], gesture?: string) {
+    if (strokes.length === 0) return;
+    const byId = new Map(strokes.map((stroke) => [stroke.id, stroke]));
+    const current = this.strokes(page);
+    if (!current.some((stroke) => byId.has(stroke.id))) return;
+    this.commit(
+      page,
+      current.map((stroke) => byId.get(stroke.id) ?? stroke),
+      gesture,
+    );
+  }
+
+  /** Removes the strokes carrying these ids, as one undoable step. */
+  removeStrokes(page: string, ids: readonly string[]) {
+    const doomed = new Set(ids);
+    if (doomed.size === 0) return;
+    const current = this.strokes(page);
+    const next = current.filter((stroke) => !doomed.has(stroke.id));
+    if (next.length !== current.length) this.commit(page, next);
   }
 
   /**
@@ -172,6 +212,9 @@ export class HandwritingEditor {
     state.redo.push(state.strokes);
     state.strokes = prev;
     state.updatedAt = Date.now();
+    // Whatever drag was folding into one entry is over; the next commit
+    // starts its own, even if it carries the same gesture.
+    this.gesture = undefined;
     this.notify();
   }
 
@@ -182,13 +225,20 @@ export class HandwritingEditor {
     state.undo.push(state.strokes);
     state.strokes = next;
     state.updatedAt = Date.now();
+    this.gesture = undefined;
     this.notify();
   }
 
-  private commit(page: string, strokes: InkStroke[]) {
+  private commit(page: string, strokes: InkStroke[], gesture?: string) {
     const state = this.pages.get(page) ?? { strokes: [], undo: [], redo: [], updatedAt: 0 };
-    state.undo.push(state.strokes);
-    state.redo = [];
+    // A continuing gesture folds into the undo entry its first frame took;
+    // anything else — a new drag, a stroke, an erase — starts a fresh one.
+    const continuing = gesture !== undefined && gesture === this.gesture;
+    if (!continuing) {
+      state.undo.push(state.strokes);
+      state.redo = [];
+    }
+    this.gesture = gesture;
     state.strokes = strokes;
     state.updatedAt = Date.now();
     this.pages.set(page, state);
