@@ -274,6 +274,11 @@ pub(crate) async fn show_file_picker<R: Runtime>(app: AppHandle<R>) -> Result<()
 }
 
 #[command]
+pub(crate) async fn take_photo<R: Runtime>(app: AppHandle<R>) -> Result<()> {
+    app.native_bridge().take_photo()
+}
+
+#[command]
 pub(crate) async fn get_storefront_region_code<R: Runtime>(
     app: AppHandle<R>,
 ) -> Result<GetStorefrontRegionCodeResponse> {

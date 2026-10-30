@@ -321,6 +321,13 @@ export async function showFilePicker(): Promise<void> {
   await invoke('plugin:native-bridge|show_file_picker');
 }
 
+// Android only. Opens the camera fire-and-forget; the photograph's URI comes
+// back as a `camera-result` plugin event, for the same reason the picker's
+// does — the activity can be torn down while the camera is in front.
+export async function takePhoto(): Promise<void> {
+  await invoke('plugin:native-bridge|take_photo');
+}
+
 export async function getStorefrontRegionCode(): Promise<GetStorefrontRegionCodeResponse> {
   const result = await invoke<GetStorefrontRegionCodeResponse>(
     'plugin:native-bridge|get_storefront_region_code',

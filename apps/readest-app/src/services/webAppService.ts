@@ -340,6 +340,10 @@ export class WebAppService extends BaseAppService {
     throw new Error('selectDirectory is not supported in browser');
   }
 
+  async saveNoteImageFromURI(): Promise<string> {
+    throw new Error('saveNoteImageFromURI is not supported in browser');
+  }
+
   async selectFiles(): Promise<string[]> {
     throw new Error('selectFiles is not supported in browser');
   }

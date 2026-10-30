@@ -334,6 +334,14 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
         private const val REQUEST_MANAGE_STORAGE = 1001
         private const val FOLDER_PICKER_REQUEST_CODE = 1002
         private const val FILE_PICKER_REQUEST_CODE = 1003
+        private const val CAMERA_REQUEST_CODE = 1004
+        // Where the camera was told to put the photo. A camera intent returns
+        // no data of its own — the picture is at the URI we handed it — so the
+        // URI has to outlive the round trip. It is static so it survives the
+        // plugin being re-instantiated; if the whole process dies behind the
+        // camera it is lost, and the photo is still in the gallery, where
+        // "Insert from album" will find it.
+        private var pendingCameraOutput: Uri? = null
         var pendingInvoke: Invoke? = null
         private var pendingAuthCallbackTarget: OAuthCallbackTarget? = null
         var pendingFolderPickerInvoke: Invoke? = null
@@ -357,6 +365,11 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
             } else if (requestCode == FILE_PICKER_REQUEST_CODE &&
                 resultCode == Activity.RESULT_OK && data != null) {
                 pendingFilePickerData = data
+            } else if (requestCode == CAMERA_REQUEST_CODE &&
+                resultCode != Activity.RESULT_OK) {
+                // Cancelled before the plugin was back: drop the placeholder
+                // so an empty row is not left in the gallery.
+                pendingCameraOutput = null
             }
         }
     }
@@ -1391,6 +1404,69 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
         }
     }
 
+    // Takes a photograph and reports where it landed, as `camera-result`.
+    //
+    // The photo is written straight into the gallery rather than into a
+    // private file: a MediaStore entry needs no FileProvider path to be
+    // configured, works under scoped storage, and leaves the person with the
+    // picture they just took where they would expect to find it. The note
+    // gets its own copy either way.
+    //
+    // Like the file picker above, this resolves at once and delivers the
+    // result as a queued event, because a promise held across the round trip
+    // dies if Android tears the activity down while the camera is in front.
+    @Command
+    fun take_photo(invoke: Invoke) {
+        try {
+            val values = ContentValues().apply {
+                put(
+                    MediaStore.Images.Media.DISPLAY_NAME,
+                    "readest-${System.currentTimeMillis()}.jpg",
+                )
+                put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+            }
+            val output = activity.contentResolver.insert(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                values,
+            )
+            if (output == null) {
+                invoke.reject("Could not prepare a place for the photo")
+                return
+            }
+            pendingCameraOutput = output
+            val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
+                putExtra(MediaStore.EXTRA_OUTPUT, output)
+                // The camera app is a different app writing to our row.
+                addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            activity.startActivityForResult(intent, CAMERA_REQUEST_CODE)
+            invoke.resolve()
+        } catch (e: Exception) {
+            // No camera app, or the device refused: say so rather than
+            // leaving a button that quietly does nothing.
+            discardPendingCameraOutput()
+            invoke.reject("Failed to open the camera: ${e.message}")
+        }
+    }
+
+    private fun discardPendingCameraOutput() {
+        val output = pendingCameraOutput ?: return
+        pendingCameraOutput = null
+        try {
+            activity.contentResolver.delete(output, null, null)
+        } catch (e: Exception) {
+            // The row may never have been written; nothing to undo.
+        }
+    }
+
+    private fun emitCameraResult() {
+        val output = pendingCameraOutput ?: return
+        pendingCameraOutput = null
+        val payload = JSObject().apply { put("uri", output.toString()) }
+        emitOrQueue("camera-result", payload)
+    }
+
     private fun emitFilePickerResult(data: Intent) {
         val uris = mutableListOf<Uri>()
         data.clipData?.let { clip ->
@@ -1441,6 +1517,14 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
         } else if (requestCode == FILE_PICKER_REQUEST_CODE) {
             if (resultCode == Activity.RESULT_OK && data != null) {
                 emitFilePickerResult(data)
+            }
+        } else if (requestCode == CAMERA_REQUEST_CODE) {
+            if (resultCode == Activity.RESULT_OK) {
+                emitCameraResult()
+            } else {
+                // Backed out of the camera: take the empty row back out of
+                // the gallery rather than leaving a blank picture behind.
+                discardPendingCameraOutput()
             }
         }
     }

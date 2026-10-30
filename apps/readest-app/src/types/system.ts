@@ -252,6 +252,7 @@ export interface AppService {
   loadQuickNotes(): Promise<QuickNotesData>;
   saveQuickNotes(data: QuickNotesData): Promise<void>;
   saveNoteImage(sourcePath: string, id: string): Promise<string>;
+  saveNoteImageFromURI(uri: string, id: string): Promise<string>;
   noteImageURL(file: string): Promise<string>;
   pruneNoteImages(notes: readonly QuickNote[]): Promise<number>;
   loadLibraryBooks(): Promise<Book[]>;

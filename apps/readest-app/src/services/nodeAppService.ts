@@ -384,6 +384,10 @@ export class NodeAppService extends BaseAppService {
     throw new Error('selectDirectory is not supported in Node.js environment');
   }
 
+  async saveNoteImageFromURI(): Promise<string> {
+    throw new Error('saveNoteImageFromURI is not supported in Node.js environment');
+  }
+
   async selectFiles(): Promise<string[]> {
     throw new Error('selectFiles is not supported in Node.js environment');
   }
