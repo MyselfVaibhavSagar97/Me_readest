@@ -102,6 +102,12 @@ export abstract class BaseAppService implements AppService {
   abstract setCustomRootDir(customRootDir: string): Promise<void>;
   abstract selectDirectory(mode: SelectDirectoryMode): Promise<string>;
   abstract selectFiles(name: string, extensions: string[]): Promise<string[]>;
+  /**
+   * Copies a picture that only exists as a content URI — a photograph the
+   * camera has just written into the gallery — in beside the notes.
+   * Android's way of handing a file over, so only the native app can do it.
+   */
+  abstract saveNoteImageFromURI(uri: string, id: string): Promise<string>;
   abstract saveFile(
     filename: string,
     content: string | ArrayBuffer | null,

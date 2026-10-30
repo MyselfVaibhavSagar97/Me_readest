@@ -54,6 +54,7 @@ import { detectViewTransitionGroup, detectViewTransitionsAPI } from '@/utils/vie
 import { useLibraryStore } from '@/store/libraryStore';
 
 import { BaseAppService } from './appService';
+import { saveNoteImage as saveNoteImageToDisk } from '@/services/notes/noteImageStore';
 import {
   buildCoverThumbnailRequests,
   COVER_THUMBNAIL_READY_EVENT,
@@ -854,6 +855,23 @@ export class NativeAppService extends BaseAppService {
       await this.allowPathsInScopes([selected as string], true);
     }
     return selected as string;
+  }
+
+  async saveNoteImageFromURI(uri: string, id: string): Promise<string> {
+    // A content URI cannot be read as a path, so it is copied into the cache
+    // first — the same hop the book importer makes — and then stored beside
+    // the notes like any other picture.
+    const prefix = await this.fs.getPrefix('Cache');
+    const temp = await join(prefix, `${crypto.randomUUID()}.jpg`);
+    const res = await copyURIToPath({ uri, dst: temp });
+    if (!res.success) {
+      throw new Error('Failed to copy the photo');
+    }
+    try {
+      return await saveNoteImageToDisk(this.fs, temp, id);
+    } finally {
+      await this.fs.removeFile(temp, 'None').catch(() => {});
+    }
   }
 
   async selectFiles(name: string, extensions: string[]): Promise<string[]> {

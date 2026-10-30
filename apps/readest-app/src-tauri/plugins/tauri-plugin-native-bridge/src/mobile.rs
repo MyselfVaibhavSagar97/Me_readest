@@ -333,6 +333,15 @@ impl<R: Runtime> NativeBridge<R> {
             .run_mobile_plugin("show_file_picker", ())
             .map_err(Into::into)
     }
+
+    // Android only. Fire-and-forget, for the same reason as the picker above:
+    // the photo's URI arrives as a `camera-result` plugin event, which
+    // survives the activity being recreated behind the camera app.
+    pub fn take_photo(&self) -> crate::Result<()> {
+        self.0
+            .run_mobile_plugin("take_photo", ())
+            .map_err(Into::into)
+    }
 }
 
 impl<R: Runtime> NativeBridge<R> {

@@ -237,6 +237,10 @@ impl<R: Runtime> NativeBridge<R> {
         Err(crate::Error::UnsupportedPlatformError)
     }
 
+    pub fn take_photo(&self) -> crate::Result<()> {
+        Err(crate::Error::UnsupportedPlatformError)
+    }
+
     pub fn get_storefront_region_code(&self) -> crate::Result<GetStorefrontRegionCodeResponse> {
         Err(crate::Error::UnsupportedPlatformError)
     }

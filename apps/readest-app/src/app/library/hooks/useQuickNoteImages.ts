@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { addPluginListener, type PluginListener } from '@tauri-apps/api/core';
 
 import { useEnv } from '@/context/EnvContext';
+import { takePhoto } from '@/utils/bridge';
 import type { NoteImage, QuickNote } from '@/types/notes';
 import {
   IMAGE_EXTENSIONS,
@@ -95,6 +97,69 @@ export const useQuickNoteImages = (note: QuickNote) => {
   }, [fileKey]);
 
   /**
+   * Puts a picture that is already stored beside the notes onto the page:
+   * measured, placed in the middle, and picked up ready to be moved.
+   */
+  const place = useCallback(
+    async (id: string, file: string) => {
+      if (!appService) return;
+      const url = await appService.noteImageURL(file);
+      const natural = await measure(url);
+      const box = placeImage(natural.width, natural.height);
+      setUrls((current) => ({ ...current, [file]: url }));
+      urlsRef.current[file] = url;
+      setImages((current) => [...current, { id, file, ...box }]);
+      setSelected(id);
+    },
+    [appService],
+  );
+
+  /**
+   * Takes a photograph and puts it on the page.
+   *
+   * The camera answers through an event rather than by resolving this call:
+   * Android can tear the app down while the camera is in front, and a promise
+   * held across that round trip would die with it. The listener below is what
+   * actually receives the photo.
+   */
+  const insertFromCamera = useCallback(async () => {
+    if (!appService?.isAndroidApp || busy) return;
+    setBusy(true);
+    try {
+      await takePhoto();
+    } catch {
+      // No camera, or the device refused it. The button stops spinning and
+      // the album is still there.
+      setBusy(false);
+    }
+  }, [appService, busy]);
+
+  // The photograph, once it has been taken.
+  useEffect(() => {
+    if (!appService?.isAndroidApp) return;
+    let cancelled = false;
+    const listener: Promise<PluginListener> = addPluginListener(
+      'native-bridge',
+      'camera-result',
+      async (payload: { uri?: string }) => {
+        const uri = payload?.uri;
+        if (!uri || cancelled) return;
+        try {
+          const id = nextImageId();
+          const file = await appService.saveNoteImageFromURI(uri, id);
+          if (!cancelled) await place(id, file);
+        } finally {
+          if (!cancelled) setBusy(false);
+        }
+      },
+    );
+    return () => {
+      cancelled = true;
+      void listener.then((handle) => handle.unregister()).catch(() => {});
+    };
+  }, [appService, place]);
+
+  /**
    * Opens the gallery and puts the chosen picture on the page. The file is
    * copied in first, so the note does not depend on a photograph the person
    * may later move or delete.
@@ -107,17 +172,11 @@ export const useQuickNoteImages = (note: QuickNote) => {
       const source = chosen[0];
       if (!source) return;
       const id = nextImageId();
-      const file = await appService.saveNoteImage(source, id);
-      const url = await appService.noteImageURL(file);
-      const natural = await measure(url);
-      const box = placeImage(natural.width, natural.height);
-      setUrls((current) => ({ ...current, [file]: url }));
-      setImages((current) => [...current, { id, file, ...box }]);
-      setSelected(id);
+      await place(id, await appService.saveNoteImage(source, id));
     } finally {
       setBusy(false);
     }
-  }, [appService, busy]);
+  }, [appService, busy, place]);
 
   const beginImageDrag = useCallback(() => {
     const image = images.find((candidate) => candidate.id === selected);
@@ -178,6 +237,9 @@ export const useQuickNoteImages = (note: QuickNote) => {
       : null,
     select: setSelected,
     insertFromAlbum,
+    insertFromCamera,
+    /** The camera is only there on the device that has one. */
+    canTakePhoto: Boolean(appService?.isAndroidApp),
     inserting: busy,
     beginImageDrag,
     moveImageTo,

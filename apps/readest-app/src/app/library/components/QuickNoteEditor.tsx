@@ -261,6 +261,8 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
               {openPanel === 'picture' && (
                 <PicturePanel
                   onInsertFromAlbum={() => void pictures.insertFromAlbum()}
+                  onTakePhoto={() => void pictures.insertFromCamera()}
+                  canTakePhoto={pictures.canTakePhoto}
                   inserting={pictures.inserting}
                   count={pictures.images.length}
                 />

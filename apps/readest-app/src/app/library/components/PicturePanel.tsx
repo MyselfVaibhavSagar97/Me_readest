@@ -32,8 +32,25 @@ export const PictureIcon: React.FC<{ className?: string }> = ({ className }) => 
   </svg>
 );
 
+/** A camera body with a lens, drawn like the other tool glyphs here. */
+export const CameraIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg viewBox='0 0 24 24' width='1em' height='1em' className={className} aria-hidden='true'>
+    <path
+      d='M4 7.5 L8 7.5 L9.5 5 L14.5 5 L16 7.5 L20 7.5 A1.5 1.5 0 0 1 21.5 9 L21.5 18 A1.5 1.5 0 0 1 20 19.5 L4 19.5 A1.5 1.5 0 0 1 2.5 18 L2.5 9 A1.5 1.5 0 0 1 4 7.5 Z'
+      fill='none'
+      stroke='currentColor'
+      strokeWidth='1.6'
+      strokeLinejoin='round'
+    />
+    <circle cx='12' cy='13.2' r='3.6' fill='none' stroke='currentColor' strokeWidth='1.6' />
+  </svg>
+);
+
 interface PicturePanelProps {
   onInsertFromAlbum: () => void;
+  onTakePhoto: () => void;
+  /** False where there is no camera to open, as on the desktop app. */
+  canTakePhoto: boolean;
   /** True while the picker is open or a picture is being copied in. */
   inserting: boolean;
   /** How many pictures the page already holds. */
@@ -44,11 +61,17 @@ interface PicturePanelProps {
  * The picture tool's panel: where a picture comes from, and what can be done
  * with the ones already on the page.
  *
- * There is no "Take photo" here. The app has no camera of its own, and a
- * button that opened nothing would be worse than its absence; on a tablet
- * the gallery already holds anything the camera has just taken.
+ * "Take photo" appears only where there is a camera to open. The photograph
+ * is written into the gallery as well as into the note, so it is where it
+ * would be expected to be afterwards.
  */
-const PicturePanel: React.FC<PicturePanelProps> = ({ onInsertFromAlbum, inserting, count }) => {
+const PicturePanel: React.FC<PicturePanelProps> = ({
+  onInsertFromAlbum,
+  onTakePhoto,
+  canTakePhoto,
+  inserting,
+  count,
+}) => {
   const _ = useTranslation();
 
   return (
@@ -69,6 +92,23 @@ const PicturePanel: React.FC<PicturePanelProps> = ({ onInsertFromAlbum, insertin
           </span>
         </span>
       </button>
+
+      {canTakePhoto && (
+        <button
+          type='button'
+          onClick={onTakePhoto}
+          disabled={inserting}
+          className='eink-bordered border-base-300 btn btn-sm h-auto justify-start gap-3 rounded-lg border bg-transparent px-3 py-2.5'
+        >
+          <CameraIcon className='h-5 w-5 shrink-0' />
+          <span className='flex min-w-0 flex-col items-start'>
+            <span className='text-sm font-normal'>{_('Take photo')}</span>
+            <span className='text-base-content/55 text-xs font-normal'>
+              {_('Opens the camera; the photo is saved to your gallery too')}
+            </span>
+          </span>
+        </button>
+      )}
 
       <p className='text-base-content/55 text-xs leading-relaxed'>
         {count > 0
