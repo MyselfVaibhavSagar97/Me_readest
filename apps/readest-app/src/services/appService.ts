@@ -105,9 +105,16 @@ export abstract class BaseAppService implements AppService {
   /**
    * Copies a picture that only exists as a content URI — a photograph the
    * camera has just written into the gallery — in beside the notes.
+   *
    * Android's way of handing a file over, so only the native app can do it.
+   * Concrete rather than abstract on purpose: an abstract member here is a
+   * new obligation on every subclass, including the stand-ins in tests that
+   * have nothing to do with notes. The platforms that can do this override
+   * it; the rest inherit a refusal that says so.
    */
-  abstract saveNoteImageFromURI(uri: string, id: string): Promise<string>;
+  async saveNoteImageFromURI(_uri: string, _id: string): Promise<string> {
+    throw new Error('saveNoteImageFromURI is not supported on this platform');
+  }
   abstract saveFile(
     filename: string,
     content: string | ArrayBuffer | null,
