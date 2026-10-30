@@ -31,6 +31,7 @@ import PicturePanel, { PictureIcon } from './PicturePanel';
 import NoteSelection from './NoteSelection';
 import { useQuickNoteInk } from '../hooks/useQuickNoteInk';
 import { useQuickNoteImages } from '../hooks/useQuickNoteImages';
+import { useQuickNoteExport, type ExportAs } from '../hooks/useQuickNoteExport';
 
 /**
  * The lasso: a dashed loop round ink, drawn rather than borrowed — no icon
@@ -97,6 +98,20 @@ const LaserToolIcon: React.FC<{ className?: string }> = ({ className }) => (
   </svg>
 );
 
+/** Three dots: the usual "more" affordance, drawn to match the others. */
+const MoreIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg viewBox='0 0 24 24' width='1em' height='1em' className={className} aria-hidden='true'>
+    <circle cx='12' cy='5' r='1.9' fill='currentColor' />
+    <circle cx='12' cy='12' r='1.9' fill='currentColor' />
+    <circle cx='12' cy='19' r='1.9' fill='currentColor' />
+  </svg>
+);
+
+const EXPORTS: { as: ExportAs; label: string; hint: string }[] = [
+  { as: 'pdf', label: 'Export as PDF', hint: 'One page, the size it was written' },
+  { as: 'picture', label: 'Export as picture', hint: 'A PNG of the whole page' },
+];
+
 const TOOLS: { tool: InkTool; label: string; Icon: IconType }[] = [
   { tool: 'pen', label: 'Pen', Icon: RiPencilLine },
   { tool: 'marker', label: 'Marker', Icon: RiMarkPenLine },
@@ -134,6 +149,14 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
   const [confirmClear, setConfirmClear] = useState(false);
   const ink = useQuickNoteInk(note);
   const pictures = useQuickNoteImages(note);
+  const { exportAs, exporting } = useQuickNoteExport(
+    note.title,
+    ink.strokes,
+    pictures.images,
+    pictures.urls,
+  );
+  /** The three-dot menu in the corner, open or not. */
+  const [menuOpen, setMenuOpen] = useState(false);
   /**
    * While the picture tool is in hand the pictures sit above the ink and
    * answer to the finger; with any other tool they are background, so
@@ -420,6 +443,56 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
             Icon={RiCloseLine}
             onClick={handleClose}
           />
+          <div className='relative'>
+            <div className={clsx('rounded-md', menuOpen && 'bg-base-300 eink:border')}>
+              <AnnotationToolButton
+                showTooltip
+                tooltipText={_('More')}
+                Icon={MoreIcon}
+                onClick={() => setMenuOpen((open) => !open)}
+              />
+            </div>
+            {menuOpen && (
+              <>
+                {/* Anywhere else closes it, including the page, where a tap
+                    would otherwise leave a mark behind the menu. */}
+                <button
+                  type='button'
+                  aria-label={_('Close')}
+                  tabIndex={-1}
+                  onClick={() => setMenuOpen(false)}
+                  className='fixed inset-0 z-0 cursor-default'
+                />
+                <div
+                  role='menu'
+                  aria-label={_('More')}
+                  className={clsx(
+                    'eink-bordered bg-base-100 border-base-300/50 not-eink:shadow-md',
+                    'absolute end-0 top-full z-10 mt-2 w-56 rounded-xl border py-1',
+                  )}
+                >
+                  {EXPORTS.map(({ as, label, hint }) => (
+                    <button
+                      key={as}
+                      type='button'
+                      role='menuitem'
+                      disabled={exporting !== null}
+                      onClick={() => {
+                        setMenuOpen(false);
+                        void exportAs(as);
+                      }}
+                      className='not-eink:hover:bg-base-200 flex w-full flex-col items-start px-3 py-2 text-start'
+                    >
+                      <span className='text-sm'>
+                        {exporting === as ? _('Exporting…') : _(label)}
+                      </span>
+                      <span className='text-base-content/55 text-xs'>{_(hint)}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
       {confirmClear && (
