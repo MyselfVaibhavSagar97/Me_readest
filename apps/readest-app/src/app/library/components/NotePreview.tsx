@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 
 import { useEnv } from '@/context/EnvContext';
-import { renderStrokes } from '@/services/handwriting/renderer';
+import { paintNote } from '@/services/notes/noteExport';
 import type { InkStroke } from '@/services/handwriting/model';
 import { QUICK_NOTE_ASPECT, type NoteImage } from '@/types/notes';
 import { PAPER_COLOR } from '@/services/notes/penSettings';
@@ -82,19 +82,9 @@ const NotePreview: React.FC<NotePreviewProps> = ({ ink, images, className }) => 
     canvas.width = Math.max(1, Math.round(box.width * dpr));
     canvas.height = Math.max(1, Math.round(box.height * dpr));
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, box.width, box.height);
-    // Pictures first: on the note they sit under the writing, and a card that
-    // layered them the other way round would not be the note.
-    for (const { image, el } of loaded) {
-      ctx.drawImage(
-        el,
-        image.left * box.width,
-        image.top * box.height,
-        image.width * box.width,
-        image.height * box.height,
-      );
-    }
-    renderStrokes(ctx, ink, { left: 0, top: 0, width: box.width, height: box.height });
+    // The same painting an export uses, so a card cannot show something
+    // different from the file the note exports to.
+    paintNote(ctx, ink, loaded, box);
   }, [ink, loaded]);
 
   return (
