@@ -22,6 +22,7 @@ import {
   type SelectableKind,
 } from './selection';
 import { isClosed, shapePoints, type ShapeKind } from './shapes';
+import type { LaserPoint } from './laser';
 import type { InkAnchoring } from './anchor';
 
 /** Where a stroke drawn over a scrolled view belongs. */
@@ -163,6 +164,8 @@ export class HandwritingService {
   private liveLasso = false;
   /** A drag draws a shape rather than a line of ink. */
   private liveShape = false;
+  /** A drag points with the laser, leaving nothing behind. */
+  private liveLaser = false;
   /** Where the shape being dragged was started from. */
   private shapeStart: InkPoint | null = null;
   private stabilizer = new StrokeStabilizer();
@@ -174,6 +177,8 @@ export class HandwritingService {
   private onErased: (() => void) | null = null;
   /** Told what a finished lasso caught, by stroke id. */
   private onSelected: ((ids: string[]) => void) | null = null;
+  /** Handed each batch of laser points as the hand moves. */
+  private onLasered: ((points: LaserPoint[]) => void) | null = null;
 
   constructor(
     editor: HandwritingEditor,
@@ -254,6 +259,21 @@ export class HandwritingService {
    * draws the chosen shape between where it started and where it is now,
    * instead of a line of ink.
    */
+  /**
+   * Puts the laser in the hand, or takes it out. While it is set, a drag
+   * reports where the hand is and nothing else: no stroke is drawn, nothing
+   * reaches the editor, and nothing is saved. What little there is to see
+   * fades on its own.
+   */
+  setLaserMode(laser: boolean) {
+    this.liveLaser = laser;
+    if (!laser) this.live = [];
+  }
+
+  onLaser(fn: ((points: LaserPoint[]) => void) | null) {
+    this.onLasered = fn;
+  }
+
   setShapeMode(shape: boolean) {
     this.liveShape = shape;
     if (!shape) {
@@ -540,6 +560,16 @@ export class HandwritingService {
   }
 
   private onBatch(points: InkPoint[], kind: 'move' | 'end', erase: boolean) {
+    // The laser first, because it is the only tool that touches neither the
+    // editor nor the canvas: the points go straight out to whatever is
+    // drawing the trail, stamped with the moment they arrived.
+    if (this.liveLaser) {
+      this.stabilizer.reset();
+      const now = Date.now();
+      this.onLasered?.(points.map(([x, y]): LaserPoint => [x, y, now]));
+      return;
+    }
+
     // A shape is drawn between where the drag started and where it is now,
     // redrawn from the start every frame rather than accumulated, so pulling
     // back makes it smaller again.

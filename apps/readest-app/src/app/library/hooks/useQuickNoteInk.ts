@@ -14,9 +14,12 @@ import {
   strokesByIds,
   type Bounds,
 } from '@/services/handwriting/selection';
+import type { LaserPoint } from '@/services/handwriting/laser';
+import type { LaserTrail } from '@/app/library/components/LaserLayer';
 import {
   DEFAULT_ERASER,
   DEFAULT_HIGHLIGHTER,
+  DEFAULT_LASER,
   DEFAULT_LASSO,
   DEFAULT_PEN,
   DEFAULT_SHAPE,
@@ -24,6 +27,7 @@ import {
   mmToFraction,
   type EraserSettings,
   type HighlighterSettings,
+  type LaserSettings,
   type LassoSettings,
   type PenSettings,
   type ShapeSettings,
@@ -79,9 +83,19 @@ export const useQuickNoteInk = (note: QuickNote) => {
   const [highlighter, setHighlighter] = useState<HighlighterSettings>(DEFAULT_HIGHLIGHTER);
   const [lasso, setLasso] = useState<LassoSettings>(DEFAULT_LASSO);
   const [shape, setShape] = useState<ShapeSettings>(DEFAULT_SHAPE);
+  const [laser, setLaser] = useState<LaserSettings>(DEFAULT_LASER);
   const [erasing, setErasing] = useState(false);
   const [lassoing, setLassoing] = useState(false);
   const [shaping, setShaping] = useState(false);
+  const [lasing, setLasing] = useState(false);
+
+  /**
+   * The laser's trail, held in a ref rather than in state: points arrive as
+   * fast as the hand moves, and re-rendering the editor for each of them
+   * would cost far more than drawing them. The layer reads it and redraws
+   * itself; nothing else needs to know.
+   */
+  const laserTrail = useRef<LaserTrail>({ points: [], wake: null });
   /** The ids the lasso caught; empty when nothing is picked up. */
   const [selection, setSelection] = useState<string[]>([]);
   const [penOnly, setPenOnlyState] = useState(false);
@@ -190,6 +204,11 @@ export const useQuickNoteInk = (note: QuickNote) => {
       if (autoDeselectRef.current) setErasing(false);
     });
     service.onSelect(setSelection);
+    service.onLaser((points: LaserPoint[]) => {
+      const trail = laserTrail.current;
+      trail.points.push(...points);
+      trail.wake?.();
+    });
     serviceRef.current = service;
     void service.attach(el).then(paint);
   }, [editor, paint]);
@@ -279,6 +298,10 @@ export const useQuickNoteInk = (note: QuickNote) => {
   }, [shaping]);
 
   useEffect(() => {
+    serviceRef.current?.setLaserMode(lasing);
+  }, [lasing]);
+
+  useEffect(() => {
     serviceRef.current?.setLassoMode(lassoing);
     // Putting the lasso down lets go of what it was holding: a selection box
     // left floating over the page while the pen is back in hand is a trap.
@@ -289,6 +312,7 @@ export const useQuickNoteInk = (note: QuickNote) => {
     setErasing(false);
     setLassoing(false);
     setShaping(false);
+    setLasing(false);
     setTool(next);
   }, []);
 
@@ -323,6 +347,12 @@ export const useQuickNoteInk = (note: QuickNote) => {
     [],
   );
 
+  /** Changes one or more of the laser's settings, leaving the rest alone. */
+  const updateLaser = useCallback(
+    (patch: Partial<LaserSettings>) => setLaser((current) => ({ ...current, ...patch })),
+    [],
+  );
+
   // One tool is in the hand at a time: picking up the eraser puts the lasso
   // down, and the other way round.
   const chooseEraser = useCallback((on: boolean) => {
@@ -330,6 +360,7 @@ export const useQuickNoteInk = (note: QuickNote) => {
     if (on) {
       setLassoing(false);
       setShaping(false);
+      setLasing(false);
     }
   }, []);
 
@@ -338,6 +369,7 @@ export const useQuickNoteInk = (note: QuickNote) => {
     if (on) {
       setErasing(false);
       setShaping(false);
+      setLasing(false);
     }
   }, []);
 
@@ -346,6 +378,16 @@ export const useQuickNoteInk = (note: QuickNote) => {
     if (on) {
       setErasing(false);
       setLassoing(false);
+      setLasing(false);
+    }
+  }, []);
+
+  const chooseLaser = useCallback((on: boolean) => {
+    setLasing(on);
+    if (on) {
+      setErasing(false);
+      setLassoing(false);
+      setShaping(false);
     }
   }, []);
 
@@ -445,6 +487,11 @@ export const useQuickNoteInk = (note: QuickNote) => {
     updateShape,
     shaping,
     setShaping: chooseShape,
+    laser,
+    updateLaser,
+    lasing,
+    setLasing: chooseLaser,
+    laserTrail,
     clearPage,
     erasing,
     setErasing: chooseEraser,

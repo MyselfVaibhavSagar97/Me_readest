@@ -25,6 +25,8 @@ import EraserPanel from './EraserPanel';
 import HighlighterPanel from './HighlighterPanel';
 import LassoPanel from './LassoPanel';
 import ShapePanel from './ShapePanel';
+import LaserPanel from './LaserPanel';
+import LaserLayer from './LaserLayer';
 import PicturePanel, { PictureIcon } from './PicturePanel';
 import NoteSelection from './NoteSelection';
 import { useQuickNoteInk } from '../hooks/useQuickNoteInk';
@@ -75,6 +77,26 @@ const ShapeToolIcon: React.FC<{ className?: string }> = ({ className }) => (
   </svg>
 );
 
+/**
+ * The laser: a point of light throwing off rays. Sized in `em`, like the
+ * icons beside it.
+ */
+const LaserToolIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg viewBox='0 0 24 24' width='1em' height='1em' className={className} aria-hidden='true'>
+    <circle cx='12' cy='12' r='3.2' fill='currentColor' />
+    <g stroke='currentColor' strokeWidth='1.7' strokeLinecap='round'>
+      <path d='M12 2.5 L12 5.5' />
+      <path d='M12 18.5 L12 21.5' />
+      <path d='M2.5 12 L5.5 12' />
+      <path d='M18.5 12 L21.5 12' />
+      <path d='M5.2 5.2 L7.3 7.3' />
+      <path d='M16.7 16.7 L18.8 18.8' />
+      <path d='M18.8 5.2 L16.7 7.3' />
+      <path d='M7.3 16.7 L5.2 18.8' />
+    </g>
+  </svg>
+);
+
 const TOOLS: { tool: InkTool; label: string; Icon: IconType }[] = [
   { tool: 'pen', label: 'Pen', Icon: RiPencilLine },
   { tool: 'marker', label: 'Marker', Icon: RiMarkPenLine },
@@ -107,7 +129,7 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   // Which tool has its settings dropped down, if any.
   const [openPanel, setOpenPanel] = useState<
-    InkTool | 'eraser' | 'lasso' | 'shape' | 'picture' | null
+    InkTool | 'eraser' | 'lasso' | 'shape' | 'laser' | 'picture' | null
   >(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const ink = useQuickNoteInk(note);
@@ -233,6 +255,9 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
               {openPanel === 'shape' && (
                 <ShapePanel shape={ink.shape} onChange={ink.updateShape} />
               )}
+              {openPanel === 'laser' && (
+                <LaserPanel laser={ink.laser} onChange={ink.updateLaser} />
+              )}
               {openPanel === 'picture' && (
                 <PicturePanel
                   onInsertFromAlbum={() => void pictures.insertFromAlbum()}
@@ -327,6 +352,21 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
               }}
             />
           </div>
+          <div className={clsx('rounded-md', ink.lasing && 'bg-base-300 eink:border')}>
+            <AnnotationToolButton
+              showTooltip
+              tooltipText={_('Laser pointer')}
+              Icon={LaserToolIcon}
+              onClick={() => {
+                if (ink.lasing) {
+                  setOpenPanel((open) => (open === 'laser' ? null : 'laser'));
+                } else {
+                  setOpenPanel(null);
+                  ink.setLasing(true);
+                }
+              }}
+            />
+          </div>
           {/* A picture is placed rather than drawn, so this opens its panel
               straight away instead of taking a turn in the hand first. */}
           <div className={clsx('rounded-md', openPanel === 'picture' && 'bg-base-300 eink:border')}>
@@ -339,6 +379,7 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
                 ink.setLassoing(false);
                 ink.setErasing(false);
                 ink.setShaping(false);
+                ink.setLasing(false);
               }}
             />
           </div>
@@ -471,6 +512,13 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
                 // on the picture is not also read as a pen stroke.
                 pointerEvents: handlingPictures ? 'none' : 'auto',
               }}
+            />
+            {/* Above the ink: light falls on top of what is on the page. */}
+            <LaserLayer
+              trail={ink.laserTrail}
+              settings={ink.laser}
+              width={size.width}
+              height={size.height}
             />
             {pictures.selected && pictures.selectedBounds && (
               <NoteSelection
