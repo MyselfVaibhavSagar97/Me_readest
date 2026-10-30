@@ -6,8 +6,8 @@
  * fill it. A library for that would be a megabyte of dependency for about
  * eighty lines of well-specified format.
  *
- * The page is the note's own page, in points, so a note printed from the PDF
- * comes out at the size it was written.
+ * The pages are the note's own pages, in points, so a note printed from the
+ * PDF comes out at the size it was written.
  */
 
 /** A4 in PDF points (1/72 inch), the shape a note page already is. */
@@ -82,36 +82,52 @@ const COLOR_SPACES: Record<number, string> = {
  * table is one byte out still looks like a PDF and will not open.
  */
 export const buildNotePdf = (
-  jpeg: Uint8Array,
+  jpegs: Uint8Array | Uint8Array[],
   widthPt = A4_WIDTH_PT,
   heightPt = A4_HEIGHT_PT,
 ): Uint8Array => {
-  const info = readJpeg(jpeg);
-  if (!info) throw new Error('Not a JPEG this can embed');
+  const pages = Array.isArray(jpegs) ? jpegs : [jpegs];
+  if (pages.length === 0) throw new Error('A PDF needs at least one page');
+  const infos = pages.map((jpeg) => {
+    const info = readJpeg(jpeg);
+    if (!info) throw new Error('Not a JPEG this can embed');
+    return info;
+  });
   const width = Number(widthPt.toFixed(3));
   const height = Number(heightPt.toFixed(3));
   // Draw the image over the whole page: scale it to the page, then paint it.
   const content = `q ${width} 0 0 ${height} 0 0 cm /Im0 Do Q\n`;
 
+  // Object 1 is the catalog and object 2 the page list; after that each page
+  // takes three — the page, its image and its content — in that order.
+  const first = (index: number) => 3 + index * 3;
+  const kids = pages.map((_unused, index) => `${first(index)} 0 R`).join(' ');
+
   const objects: Uint8Array[] = [
     LATIN1('<< /Type /Catalog /Pages 2 0 R >>'),
-    LATIN1('<< /Type /Pages /Kids [3 0 R] /Count 1 >>'),
-    LATIN1(
-      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width} ${height}] ` +
-        `/Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>`,
-    ),
-    // The image itself, stored exactly as the JPEG already is.
-    concat([
-      LATIN1(
-        `<< /Type /XObject /Subtype /Image /Width ${info.width} ` +
-          `/Height ${info.height} /ColorSpace ${COLOR_SPACES[info.components] ?? '/DeviceRGB'} ` +
-          `/BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`,
-      ),
-      jpeg,
-      LATIN1('\nendstream'),
-    ]),
-    LATIN1(`<< /Length ${content.length} >>\nstream\n${content}endstream`),
+    LATIN1(`<< /Type /Pages /Kids [${kids}] /Count ${pages.length} >>`),
   ];
+  pages.forEach((jpeg, index) => {
+    const info = infos[index]!;
+    objects.push(
+      LATIN1(
+        `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width} ${height}] ` +
+          `/Resources << /XObject << /Im0 ${first(index) + 1} 0 R >> >> ` +
+          `/Contents ${first(index) + 2} 0 R >>`,
+      ),
+      // The image itself, stored exactly as the JPEG already is.
+      concat([
+        LATIN1(
+          `<< /Type /XObject /Subtype /Image /Width ${info.width} ` +
+            `/Height ${info.height} /ColorSpace ${COLOR_SPACES[info.components] ?? '/DeviceRGB'} ` +
+            `/BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`,
+        ),
+        jpeg,
+        LATIN1('\nendstream'),
+      ]),
+      LATIN1(`<< /Length ${content.length} >>\nstream\n${content}endstream`),
+    );
+  });
 
   const parts: Uint8Array[] = [LATIN1('%PDF-1.4\n')];
   let offset = parts[0]!.length;

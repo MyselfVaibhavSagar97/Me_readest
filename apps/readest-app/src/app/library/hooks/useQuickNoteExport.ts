@@ -43,6 +43,7 @@ export const useQuickNoteExport = (
   strokes: () => InkStroke[],
   images: NoteImage[],
   urls: Record<string, string>,
+  pageCount = 1,
 ) => {
   const { appService } = useEnv();
   const _ = useTranslation();
@@ -60,6 +61,7 @@ export const useQuickNoteExport = (
         const ctx = canvas.getContext('2d');
         if (!ctx) throw new Error('No canvas to draw on');
 
+        // Decoded once, then sorted onto the page each belongs to.
         const decoded: DecodedImage[] = [];
         for (const image of images) {
           const url = urls[image.file];
@@ -67,23 +69,39 @@ export const useQuickNoteExport = (
           const el = await decode(url);
           if (el) decoded.push({ image, el });
         }
-        // Paper included: an exported file carries its own page.
-        paintNote(ctx, strokes(), decoded, box, { paper: true });
+        const all = strokes();
+        const pages = Math.max(1, pageCount);
+        /** Draws one page onto the shared canvas and takes a picture of it. */
+        const shoot = async (index: number, type: string, quality?: number) => {
+          // Paper included: an exported file carries its own page.
+          paintNote(
+            ctx,
+            all.filter((stroke) => (stroke.page ?? 0) === index),
+            decoded.filter(({ image }) => (image.page ?? 0) === index),
+            box,
+            { paper: true },
+          );
+          const blob = await toBlob(canvas, type, quality);
+          if (!blob) throw new Error('Could not make a picture of the note');
+          return blobBytes(blob);
+        };
 
         if (as === 'picture') {
-          const png = await toBlob(canvas, 'image/png');
-          if (!png) throw new Error('Could not make a picture of the note');
+          // A picture is one page: the one being looked at would be a guess,
+          // so it is the first, and a note of several pages exports as a PDF.
           await appService.saveFile(
             exportFilename(title, 'png'),
-            (await blobBytes(png)).buffer as ArrayBuffer,
+            (await shoot(0, 'image/png')).buffer as ArrayBuffer,
             { mimeType: 'image/png', share: true },
           );
         } else {
           // JPEG, because that is what a PDF can carry as-is: anything else
           // would have to be re-encoded into the file by hand.
-          const jpeg = await toBlob(canvas, 'image/jpeg', 0.92);
-          if (!jpeg) throw new Error('Could not make a picture of the note');
-          const pdf = buildNotePdf(await blobBytes(jpeg));
+          const shots: Uint8Array[] = [];
+          for (let index = 0; index < pages; index += 1) {
+            shots.push(await shoot(index, 'image/jpeg', 0.92));
+          }
+          const pdf = buildNotePdf(shots);
           await appService.saveFile(
             exportFilename(title, 'pdf'),
             pdf.buffer as ArrayBuffer,
@@ -101,7 +119,7 @@ export const useQuickNoteExport = (
         setExporting(null);
       }
     },
-    [_, appService, exporting, images, strokes, title, urls],
+    [_, appService, exporting, images, pageCount, strokes, title, urls],
   );
 
   return { exportAs, exporting };

@@ -32,7 +32,7 @@ const measure = (url: string): Promise<{ width: number; height: number }> =>
  * not go through the handwriting engine, it is a file on disk, and the two
  * have nothing to say to each other beyond sharing a page.
  */
-export const useQuickNoteImages = (note: QuickNote) => {
+export const useQuickNoteImages = (note: QuickNote, pageOf: () => number = () => 0) => {
   const { appService } = useEnv();
   const [images, setImages] = useState<NoteImage[]>(() => imagesOf(note.images));
   /** The picture being handled, if any. */
@@ -108,10 +108,11 @@ export const useQuickNoteImages = (note: QuickNote) => {
       const box = placeImage(natural.width, natural.height);
       setUrls((current) => ({ ...current, [file]: url }));
       urlsRef.current[file] = url;
-      setImages((current) => [...current, { id, file, ...box }]);
+      // Onto the page being looked at, not always the first one.
+      setImages((current) => [...current, { id, file, page: pageOf(), ...box }]);
       setSelected(id);
     },
-    [appService],
+    [appService, pageOf],
   );
 
   /**
