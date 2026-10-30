@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 
 import type { PageRect } from '@/services/handwriting/coords';
 
@@ -78,7 +84,7 @@ export const useNoteScroll = ({
   );
 
   const onPointerDown = useCallback(
-    (event: React.PointerEvent) => {
+    (event: ReactPointerEvent) => {
       if (!panWithFinger || event.pointerType !== 'touch') return;
       pan.current = { id: event.pointerId, y: event.clientY, pulled: 0 };
     },
@@ -86,7 +92,7 @@ export const useNoteScroll = ({
   );
 
   const onPointerMove = useCallback(
-    (event: React.PointerEvent) => {
+    (event: ReactPointerEvent) => {
       const held = pan.current;
       const el = scrollRef.current;
       if (!held || !el || event.pointerId !== held.id) return;
