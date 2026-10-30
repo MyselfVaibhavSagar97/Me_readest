@@ -10,6 +10,7 @@ import {
   type SelectableKind,
 } from '@/services/handwriting/selection';
 import type { ShapeKind } from '@/services/handwriting/shapes';
+import type { LaserMode } from '@/services/handwriting/laser';
 
 /**
  * A note page is A4, so a pen's width can be quoted in millimetres rather
@@ -194,3 +195,43 @@ export const DEFAULT_SHAPE: ShapeSettings = {
   color: '#1a1a1a',
   fill: false,
 };
+
+/** The laser's thickness range: a fine beam up to a broad one. */
+export const MIN_LASER_MM = 0.2;
+export const MAX_LASER_MM = 3;
+export const LASER_STEP_MM = 0.1;
+
+export const roundLaserMm = (mm: number) =>
+  Math.round(Math.min(MAX_LASER_MM, Math.max(MIN_LASER_MM, mm)) / LASER_STEP_MM) * LASER_STEP_MM;
+
+/** How long a mark lasts, in seconds. Long enough to point with, short enough to go. */
+export const MIN_LASER_SECONDS = 0.5;
+export const MAX_LASER_SECONDS = 10;
+export const LASER_STEP_SECONDS = 0.5;
+
+export const roundLaserSeconds = (seconds: number) =>
+  Math.round(
+    Math.min(MAX_LASER_SECONDS, Math.max(MIN_LASER_SECONDS, seconds)) / LASER_STEP_SECONDS,
+  ) * LASER_STEP_SECONDS;
+
+/** Everything the laser panel sets. */
+export interface LaserSettings {
+  mode: LaserMode;
+  thicknessMm: number;
+  /** How long a mark lasts before it has gone, in seconds. */
+  seconds: number;
+  color: string;
+}
+
+export const DEFAULT_LASER: LaserSettings = {
+  mode: 'line',
+  thicknessMm: 0.5,
+  seconds: 2,
+  color: '#ff3b30',
+};
+
+/**
+ * Laser colours: bright, saturated ones that read as light rather than ink.
+ * The first opens a picker, as the other rails do.
+ */
+export const LASER_COLORS = ['#ff3b30', '#2563eb', '#22c55e', '#c026d3', '#06b6d4'] as const;
