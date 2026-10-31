@@ -76,6 +76,28 @@ describe('buildNotePdf', () => {
   });
 });
 
+describe('buildNotePdf, with more than one page', () => {
+  it('wraps every page, each with its own image', () => {
+    const pdf = asText(buildNotePdf([JPEG, JPEG, JPEG]));
+    expect(pdf).toContain('/Count 3');
+    expect(pdf).toContain('/Kids [3 0 R 6 0 R 9 0 R]');
+  });
+
+  it('still points every entry at its object across three pages', () => {
+    const pdf = asText(buildNotePdf([JPEG, JPEG, JPEG]));
+    const startxref = Number(pdf.slice(pdf.lastIndexOf('startxref') + 9).trim().split('\n')[0]);
+    const rows = pdf.slice(startxref).split('\n').slice(3, 14);
+    rows.forEach((row, index) => {
+      const at = Number(row.slice(0, 10));
+      expect(pdf.slice(at, at + `${index + 1} 0 obj`.length)).toBe(`${index + 1} 0 obj`);
+    });
+  });
+
+  it('refuses a PDF with no pages at all', () => {
+    expect(() => buildNotePdf([])).toThrow();
+  });
+});
+
 describe('exportBox', () => {
   it('is the note page shape, so an export is not stretched', () => {
     const box = exportBox();

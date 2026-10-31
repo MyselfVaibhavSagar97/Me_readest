@@ -27,6 +27,12 @@ export interface QuickNote {
   folder?: string;
   ink: InkStroke[];
   /**
+   * How many pages the note has. Absent on notes written before a note could
+   * have more than one, which read as the single page they were — and never
+   * fewer than the ink needs, so a page with writing on it cannot be lost.
+   */
+  pages?: number;
+  /**
    * Pictures on the page, under the ink. Absent on every note written before
    * a note could hold anything but strokes, which reads as a note with no
    * pictures — the same note it has always been.
@@ -47,6 +53,8 @@ export interface QuickNote {
  */
 export interface NoteImage {
   id: string;
+  /** The page it sits on; absent means the first, as it did before pages. */
+  page?: number;
   /** The file's name under the note-pictures directory. */
   file: string;
   left: number;

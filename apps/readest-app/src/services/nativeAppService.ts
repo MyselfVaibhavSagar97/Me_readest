@@ -857,7 +857,7 @@ export class NativeAppService extends BaseAppService {
     return selected as string;
   }
 
-  async saveNoteImageFromURI(uri: string, id: string): Promise<string> {
+  override async saveNoteImageFromURI(uri: string, id: string): Promise<string> {
     // A content URI cannot be read as a path, so it is copied into the cache
     // first — the same hop the book importer makes — and then stored beside
     // the notes like any other picture.

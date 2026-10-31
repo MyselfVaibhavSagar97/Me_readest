@@ -33,13 +33,24 @@ import {
   type ShapeSettings,
 } from '@/services/notes/penSettings';
 import type { PageRect } from '@/services/handwriting/coords';
+import {
+  notePageKey,
+  pageCountOf,
+  pagesFromNote,
+  strokesForNote,
+} from '@/services/notes/notePages';
 import type { QuickNote } from '@/types/notes';
 
 /**
  * A quick note is one blank page, so the editor only ever has this one page
  * key — there is no book, section or spine position behind it.
  */
-const PAGE = 'note';
+/**
+ * The page the session is pointed at. Every stroke is routed to whichever
+ * page the hand was actually over, so this is only the fallback for a note
+ * whose pages have not been measured yet.
+ */
+const PAGE = notePageKey(0);
 
 const PEN_ONLY_KEY = 'quickNotePenOnly';
 
@@ -71,10 +82,11 @@ const writePenOnly = (penOnly: boolean) => {
  */
 export const useQuickNoteInk = (note: QuickNote) => {
   const [editor] = useState(
-    () => new HandwritingEditor({ [PAGE]: { strokes: note.ink, updatedAt: note.updatedAt } }),
+    () => new HandwritingEditor(pagesFromNote(note)),
   );
   const serviceRef = useRef<HandwritingService | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  /** One canvas per page, registered as each page lays itself out. */
+  const canvasesRef = useRef<(HTMLCanvasElement | null)[]>([]);
   const rectRef = useRef<PageRect | null>(null);
 
   const [tool, setTool] = useState<InkTool>('pen');
@@ -98,8 +110,12 @@ export const useQuickNoteInk = (note: QuickNote) => {
   const laserTrail = useRef<LaserTrail>({ points: [], wake: null });
   /** The ids the lasso caught; empty when nothing is picked up. */
   const [selection, setSelection] = useState<string[]>([]);
-  const [penOnly, setPenOnlyState] = useState(false);
+  // On by default: with a stylus in hand the finger is for scrolling, which
+  // is only possible while the engine is ignoring touch. A device without a
+  // pen turns it off and draws with a finger as before.
+  const [penOnly, setPenOnlyState] = useState(true);
   const [revision, setRevision] = useState(0);
+  const [pageCount, setPageCount] = useState(() => pageCountOf(note));
 
   const marker = tool === 'marker';
   const color = marker ? highlighter.color : pen.color;
@@ -112,27 +128,31 @@ export const useQuickNoteInk = (note: QuickNote) => {
   useEffect(() => setPenOnlyState(readPenOnly()), []);
 
   const paint = useCallback(() => {
-    const canvas = canvasRef.current;
-    const rect = rectRef.current;
     const service = serviceRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (!canvas || !ctx || !rect || !service) return;
+    const rects = pageRectsRef.current;
     const dpr = window.devicePixelRatio || 1;
-    const pxWidth = Math.max(1, Math.round(rect.width * dpr));
-    const pxHeight = Math.max(1, Math.round(rect.height * dpr));
-    if (canvas.width !== pxWidth || canvas.height !== pxHeight) {
-      canvas.width = pxWidth;
-      canvas.height = pxHeight;
-    }
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    // The canvas *is* the page, so ink draws from its own origin.
-    renderStrokes(ctx, service.strokesForRender(), {
-      left: 0,
-      top: 0,
-      width: rect.width,
-      height: rect.height,
+    canvasesRef.current.forEach((canvas, index) => {
+      const rect = rects[index] ?? (index === 0 ? rectRef.current : null);
+      const ctx = canvas?.getContext('2d');
+      if (!canvas || !ctx || !rect) return;
+      const pxWidth = Math.max(1, Math.round(rect.width * dpr));
+      const pxHeight = Math.max(1, Math.round(rect.height * dpr));
+      if (canvas.width !== pxWidth || canvas.height !== pxHeight) {
+        canvas.width = pxWidth;
+        canvas.height = pxHeight;
+      }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, rect.width, rect.height);
+      // The page under the hand shows the stroke being drawn as well as the
+      // ink already on it; every other page shows only what it holds.
+      const strokes =
+        service && index === activePageRef.current
+          ? service.strokesForRender()
+          : [...editor.strokes(notePageKey(index))];
+      // The canvas *is* the page, so ink draws from its own origin.
+      renderStrokes(ctx, strokes, { left: 0, top: 0, width: rect.width, height: rect.height });
     });
-  }, []);
+  }, [editor]);
 
   useEffect(() => {
     // Repaint on every committed change, not only the ones the service made
@@ -186,12 +206,22 @@ export const useQuickNoteInk = (note: QuickNote) => {
    * the frame before it, and one gesture id so the whole drag undoes at once.
    */
   const dragRef = useRef<{ strokes: InkStroke[]; bounds: Bounds; gesture: string } | null>(null);
+
+  /** Where each page sits on screen, so a stroke can be routed to one. */
+  const pageRectsRef = useRef<(PageRect | null)[]>([]);
+  /** Which page the selection tools act on: the one last drawn or tapped on. */
+  const activePageRef = useRef(0);
+  /** The page the selection and the lasso are working on. */
+  const activePage = useCallback(() => notePageKey(activePageRef.current), []);
   /** Counts drags, so two in the same millisecond cannot share an undo step. */
   const dragCount = useRef(0);
 
-  /** Builds the drawing session once both the canvas and the page are known. */
+  /** The element the hand draws on: the whole scrolling area, not one page. */
+  const surfaceRef = useRef<HTMLElement | null>(null);
+
+  /** Builds the drawing session once both the surface and a page are known. */
   const ensureAttached = useCallback(() => {
-    const el = canvasRef.current;
+    const el = surfaceRef.current;
     const rect = rectRef.current;
     if (!el || !rect || serviceRef.current) return;
     const service = new HandwritingService(editor, PAGE, rect);
@@ -214,15 +244,19 @@ export const useQuickNoteInk = (note: QuickNote) => {
   }, [editor, paint]);
 
   /**
-   * The page's bounds in viewport coordinates: the pointer backend maps
-   * clientX/clientY through them, so they must be where the page actually is
-   * on screen, not where it sits inside its container.
+   * Where every page sits on screen, in viewport coordinates: the pointer
+   * backend maps clientX/clientY through whichever one the hand is on, so
+   * these must be where the pages actually are, not where they sit inside
+   * their container.
    */
-  const setPageRect = useCallback(
-    (rect: PageRect) => {
-      rectRef.current = rect;
+  const setPageRects = useCallback(
+    (rects: (PageRect | null)[]) => {
+      pageRectsRef.current = rects;
+      const here = rects[activePageRef.current] ?? rects[0] ?? null;
+      if (!here) return;
+      rectRef.current = here;
       if (serviceRef.current) {
-        serviceRef.current.updateRect(rect);
+        serviceRef.current.updateRect(here);
         paint();
       } else {
         ensureAttached();
@@ -231,10 +265,32 @@ export const useQuickNoteInk = (note: QuickNote) => {
     [ensureAttached, paint],
   );
 
-  /** Canvas callback ref: the ink engine attaches here and leaves on unmount. */
-  const attachCanvas = useCallback(
-    (el: HTMLCanvasElement | null) => {
-      canvasRef.current = el;
+  /**
+   * Points the session at the page the hand has come down on.
+   *
+   * Everything downstream — the stroke being drawn, the eraser, the lasso,
+   * a shape — then works in that page's own space, with no need for anything
+   * to know that a note has more than one page.
+   */
+  const focusPage = useCallback(
+    (index: number) => {
+      const service = serviceRef.current;
+      const rect = pageRectsRef.current[index];
+      if (!service || !rect || index === activePageRef.current) return;
+      activePageRef.current = index;
+      rectRef.current = rect;
+      service.setPage(notePageKey(index));
+      service.updateRect(rect);
+      setSelection([]);
+      paint();
+    },
+    [paint],
+  );
+
+  /** The surface the hand draws on: the whole scrolling area. */
+  const attachSurface = useCallback(
+    (el: HTMLElement | null) => {
+      surfaceRef.current = el;
       if (!el) {
         void serviceRef.current?.detach();
         serviceRef.current = null;
@@ -243,6 +299,15 @@ export const useQuickNoteInk = (note: QuickNote) => {
       ensureAttached();
     },
     [ensureAttached],
+  );
+
+  /** Each page's canvas, so what it holds can be painted onto it. */
+  const attachPageCanvas = useCallback(
+    (index: number, el: HTMLCanvasElement | null) => {
+      canvasesRef.current[index] = el;
+      if (el) paint();
+    },
+    [paint],
   );
 
   useEffect(() => {
@@ -393,7 +458,7 @@ export const useQuickNoteInk = (note: QuickNote) => {
 
   /** The box round the picked-up ink, or null when nothing is picked up. */
   const selectionBounds = selection.length
-    ? boundsOf(strokesByIds(editor.strokes(PAGE), selection))
+    ? boundsOf(strokesByIds(editor.strokes(activePage()), selection))
     : null;
 
   /**
@@ -401,7 +466,7 @@ export const useQuickNoteInk = (note: QuickNote) => {
    * started in. Null when there is nothing to take hold of.
    */
   const beginSelectionDrag = useCallback((): Bounds | null => {
-    const picked = strokesByIds(editor.strokes(PAGE), selectionRef.current);
+    const picked = strokesByIds(editor.strokes(activePage()), selectionRef.current);
     const bounds = boundsOf(picked);
     if (!bounds) return null;
     dragCount.current += 1;
@@ -415,7 +480,7 @@ export const useQuickNoteInk = (note: QuickNote) => {
       const drag = dragRef.current;
       if (!drag) return;
       const [cx, cy] = clampMove(drag.bounds, dx, dy);
-      editor.replaceStrokes(PAGE, moveStrokes(drag.strokes, cx, cy), drag.gesture);
+      editor.replaceStrokes(activePage(), moveStrokes(drag.strokes, cx, cy), drag.gesture);
     },
     [editor],
   );
@@ -431,7 +496,7 @@ export const useQuickNoteInk = (note: QuickNote) => {
       if (!drag) return;
       const origin: [number, number] = [drag.bounds.left, drag.bounds.top];
       const capped = Math.min(factor, maxScale(drag.bounds, origin));
-      editor.replaceStrokes(PAGE, scaleStrokes(drag.strokes, origin, capped), drag.gesture);
+      editor.replaceStrokes(activePage(), scaleStrokes(drag.strokes, origin, capped), drag.gesture);
     },
     [editor],
   );
@@ -442,16 +507,16 @@ export const useQuickNoteInk = (note: QuickNote) => {
   }, []);
 
   const deleteSelection = useCallback(() => {
-    editor.removeStrokes(PAGE, selectionRef.current);
+    editor.removeStrokes(activePage(), selectionRef.current);
     setSelection([]);
   }, [editor]);
 
   /** Copies the selection; the copy is what stays picked up. */
   const duplicateSelection = useCallback(() => {
-    const picked = strokesByIds(editor.strokes(PAGE), selectionRef.current);
+    const picked = strokesByIds(editor.strokes(activePage()), selectionRef.current);
     if (picked.length === 0) return;
     const copies = duplicateStrokes(picked);
-    editor.addStrokes(PAGE, copies);
+    editor.addStrokes(activePage(), copies);
     setSelection(copies.map((stroke) => stroke.id));
   }, [editor]);
 
@@ -466,11 +531,27 @@ export const useQuickNoteInk = (note: QuickNote) => {
   }, []);
 
   /** The note's ink as it should be stored. */
-  const strokes = useCallback((): InkStroke[] => [...editor.strokes(PAGE)], [editor]);
+  const strokes = useCallback(
+    (): InkStroke[] => strokesForNote((key) => editor.strokes(key), pageCount),
+    [editor, pageCount],
+  );
+
+  /**
+   * Adds a page at the end. Pages are only ever added, never removed by this:
+   * a page with writing on it must not disappear because the count said so.
+   */
+  const addPage = useCallback(() => {
+    setPageCount((count) => count + 1);
+  }, []);
 
   return {
-    attachCanvas,
-    setPageRect,
+    setPageRects,
+    focusPage,
+    attachSurface,
+    attachPageCanvas,
+    pageCount,
+    addPage,
+    activePageRef,
     tool,
     selectTool,
     color,
@@ -513,6 +594,6 @@ export const useQuickNoteInk = (note: QuickNote) => {
     strokes,
     /** Bumped on every committed change, so the toolbar can follow the ink. */
     revision,
-    hasInk: editor.strokes(PAGE).length > 0,
+    hasInk: strokesForNote((key) => editor.strokes(key), pageCount).length > 0,
   };
 };

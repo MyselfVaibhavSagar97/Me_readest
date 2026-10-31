@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   RiArrowGoBackLine,
   RiArrowGoForwardLine,
+  RiArrowUpLine,
   RiCloseLine,
   RiEraserLine,
   RiMarkPenLine,
@@ -18,7 +19,6 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { useThemeStore } from '@/store/themeStore';
 import type { InkTool } from '@/services/handwriting/model';
 import { QUICK_NOTE_ASPECT, type QuickNote } from '@/types/notes';
-import { PAPER_COLOR } from '@/services/notes/penSettings';
 import AnnotationToolButton from '@/app/reader/components/annotator/AnnotationToolButton';
 import PenPanel from './PenPanel';
 import EraserPanel from './EraserPanel';
@@ -29,6 +29,8 @@ import LaserPanel from './LaserPanel';
 import LaserLayer from './LaserLayer';
 import PicturePanel, { PictureIcon } from './PicturePanel';
 import NoteSelection from './NoteSelection';
+import NotePage from './NotePage';
+import { useNoteScroll, PULL_TO_ADD } from '../hooks/useNoteScroll';
 import { useQuickNoteInk } from '../hooks/useQuickNoteInk';
 import { useQuickNoteImages } from '../hooks/useQuickNoteImages';
 import { useQuickNoteExport, type ExportAs } from '../hooks/useQuickNoteExport';
@@ -109,7 +111,7 @@ const MoreIcon: React.FC<{ className?: string }> = ({ className }) => (
 
 const EXPORTS: { as: ExportAs; label: string; hint: string }[] = [
   { as: 'pdf', label: 'Export as PDF', hint: 'One page, the size it was written' },
-  { as: 'picture', label: 'Export as picture', hint: 'A PNG of the whole page' },
+  { as: 'picture', label: 'Export as picture', hint: 'A PNG of the first page' },
 ];
 
 const TOOLS: { tool: InkTool; label: string; Icon: IconType }[] = [
@@ -117,10 +119,14 @@ const TOOLS: { tool: InkTool; label: string; Icon: IconType }[] = [
   { tool: 'marker', label: 'Marker', Icon: RiMarkPenLine },
 ];
 
-/** The largest page of note aspect that fits inside `box`. */
+/**
+ * How big a page is drawn: as large as fits the view, but never so tall that
+ * a whole page cannot be seen at once — pages are scrolled through, so one
+ * has to fit before the next begins.
+ */
 const fitPage = (box: DOMRect) => {
-  const width = Math.min(box.width, box.height * QUICK_NOTE_ASPECT);
-  return { width, height: width / QUICK_NOTE_ASPECT };
+  const width = Math.min(box.width - 32, (box.height - 32) * QUICK_NOTE_ASPECT);
+  return { width: Math.max(1, width), height: Math.max(1, width / QUICK_NOTE_ASPECT) };
 };
 
 interface QuickNoteEditorProps {
@@ -140,7 +146,6 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
   const _ = useTranslation();
   const { safeAreaInsets } = useThemeStore();
   const areaRef = useRef<HTMLDivElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   // Which tool has its settings dropped down, if any.
   const [openPanel, setOpenPanel] = useState<
@@ -148,22 +153,48 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
   >(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const ink = useQuickNoteInk(note);
-  const pictures = useQuickNoteImages(note);
+  const pictures = useQuickNoteImages(note, () => ink.activePageRef.current);
   const { exportAs, exporting } = useQuickNoteExport(
     note.title,
     ink.strokes,
     pictures.images,
     pictures.urls,
+    ink.pageCount,
   );
   /** The three-dot menu in the corner, open or not. */
   const [menuOpen, setMenuOpen] = useState(false);
+
+  const scroll = useNoteScroll({
+    pageCount: ink.pageCount,
+    // A finger scrolls whenever the engine is not listening to it, which is
+    // exactly when stylus-only is on. The two can then never fight over the
+    // same contact.
+    panWithFinger: ink.penOnly,
+    onPageRects: ink.setPageRects,
+    onAddPage: ink.addPage,
+  });
+
+  // Show a page that has just been added rather than leaving it below the
+  // fold, and put the session on it so writing lands there.
+  const pages = ink.pageCount;
+  const seenPages = useRef(pages);
+  useEffect(() => {
+    if (pages > seenPages.current) {
+      const added = pages - 1;
+      requestAnimationFrame(() => {
+        scroll.scrollToPage(added);
+        ink.focusPage(added);
+      });
+    }
+    seenPages.current = pages;
+  }, [pages, scroll, ink]);
   /**
    * While the picture tool is in hand the pictures sit above the ink and
    * answer to the finger; with any other tool they are background, so
    * writing over them goes to the canvas as it always has.
    */
   const handlingPictures = openPanel === 'picture' || pictures.selected !== null;
-  const { attachCanvas, setPageRect, strokes } = ink;
+  const { strokes } = ink;
 
   // How big the page can be, from the space left above the dock. Re-measured
   // on resize and rotation; the ink follows because it is stored normalized.
@@ -184,22 +215,8 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
     };
   }, []);
 
-  // Where that page actually landed on screen. Measured from the canvas after
-  // it is laid out, since the pointer backend maps clientX/clientY through it.
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !size) return;
-    const box = canvas.getBoundingClientRect();
-    setPageRect({ left: box.left, top: box.top, width: box.width, height: box.height });
-  }, [size, setPageRect]);
-
-  const setCanvas = useCallback(
-    (el: HTMLCanvasElement | null) => {
-      canvasRef.current = el;
-      attachCanvas(el);
-    },
-    [attachCanvas],
-  );
+  // Each page's box on screen is measured by the scrolling view, which is
+  // the thing that knows where they have got to.
 
   // Closing saves too: handwriting is too easy to lose to make Save the only
   // way out. A note scribbled by accident is removed from the notes list.
@@ -529,97 +546,98 @@ const QuickNoteEditor: React.FC<QuickNoteEditorProps> = ({ note, onPersist, onCl
           </div>
         </Dialog>
       )}
-      <div ref={areaRef} className='flex min-h-0 flex-1 items-center justify-center'>
-        {size && (
-          // The page: paper, then pictures, then the ink on top of them. The
-          // paper is this element's, not the canvas's, so the canvas can stay
-          // transparent and let the pictures underneath show through.
+      {/* The stack of pages. The surface keeps `touch-action: none` — that
+          property cannot tell a pen from a finger, and letting the browser
+          take gestures here means it takes pen strokes too and cancels them
+          mid-stroke. The view scrolls itself from pointer events instead,
+          where the two can actually be told apart. */}
+      <div
+        ref={(el) => {
+          scroll.scrollRef.current = el;
+          areaRef.current = el;
+          ink.attachSurface(el);
+        }}
+        className='no-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain'
+        style={{ touchAction: 'none' }}
+        onPointerDownCapture={(event) => {
+          // Point the session at the page the hand came down on, before the
+          // ink engine sees the event.
+          ink.focusPage(scroll.pageAt(event.clientY));
+          if (handlingPictures) pictures.select(null);
+        }}
+        onScroll={scroll.measure}
+        {...scroll.handlers}
+      >
+        <div className='flex flex-col items-center gap-4 py-4'>
+          {size &&
+            Array.from({ length: ink.pageCount }, (_unused, index) => (
+              <NotePage
+                key={index}
+                index={index}
+                width={size.width}
+                height={size.height}
+                images={pictures.images
+                  .filter((image) => (image.page ?? 0) === index)
+                  .map((image) => ({ image, url: pictures.urls[image.file] }))}
+                handlingPictures={handlingPictures}
+                onPickImage={pictures.select}
+                pageRef={(el) => scroll.setPageEl(index, el)}
+                canvasRef={(el) => ink.attachPageCanvas(index, el)}
+              >
+                {index === ink.activePageRef.current && (
+                  <>
+                    {/* Above the ink: light falls on what is on the page. */}
+                    <LaserLayer
+                      trail={ink.laserTrail}
+                      settings={ink.laser}
+                      width={size.width}
+                      height={size.height}
+                    />
+                    {pictures.selected && pictures.selectedBounds && (
+                      <NoteSelection
+                        bounds={pictures.selectedBounds}
+                        page={size}
+                        onBegin={pictures.beginImageDrag}
+                        onMove={pictures.moveImageTo}
+                        onScale={pictures.scaleImageTo}
+                        onEnd={pictures.endImageDrag}
+                        onDelete={pictures.deleteSelectedImage}
+                      />
+                    )}
+                    {ink.lassoing && ink.selectionBounds && (
+                      <NoteSelection
+                        bounds={ink.selectionBounds}
+                        page={size}
+                        onBegin={ink.beginSelectionDrag}
+                        onMove={ink.moveSelectionTo}
+                        onScale={ink.scaleSelectionTo}
+                        onEnd={ink.endSelectionDrag}
+                        onDelete={ink.deleteSelection}
+                        onDuplicate={ink.duplicateSelection}
+                      />
+                    )}
+                  </>
+                )}
+              </NotePage>
+            ))}
+
+          {/* Pull the stack past its end to add a page. */}
           <div
-            className='eink-bordered border-base-300/60 relative border'
-            style={{ width: size.width, height: size.height, backgroundColor: PAPER_COLOR }}
-            // Tapping the paper beside a picture lets go of it, as tapping
-            // off a selection does everywhere else.
-            onPointerDown={handlingPictures ? () => pictures.select(null) : undefined}
+            aria-hidden={!scroll.pulling}
+            className='flex flex-col items-center justify-center gap-2 overflow-hidden transition-all'
+            style={{ height: Math.min(scroll.pull, PULL_TO_ADD * 1.4) }}
           >
-            {pictures.images.map((image) => {
-              const url = pictures.urls[image.file];
-              return (
-                <img
-                  key={image.id}
-                  src={url}
-                  alt=''
-                  draggable={false}
-                  onPointerDown={
-                    handlingPictures
-                      ? (event) => {
-                          event.stopPropagation();
-                          pictures.select(image.id);
-                        }
-                      : undefined
-                  }
-                  className='absolute select-none'
-                  style={{
-                    left: `${image.left * 100}%`,
-                    top: `${image.top * 100}%`,
-                    width: `${image.width * 100}%`,
-                    height: `${image.height * 100}%`,
-                    // Inert unless the picture tool is in hand, so writing
-                    // over a picture reaches the canvas as it always has.
-                    pointerEvents: handlingPictures ? 'auto' : 'none',
-                    touchAction: 'none',
-                    // A picture that failed to load leaves a faint box rather
-                    // than nothing, so it can still be found and removed.
-                    backgroundColor: url ? undefined : 'rgba(0,0,0,0.04)',
-                  }}
-                />
-              );
-            })}
-            <canvas
-              ref={setCanvas}
-              aria-label={_('Note Page')}
-              className='absolute inset-0 h-full w-full'
-              style={{
-                touchAction: 'none',
-                userSelect: 'none',
-                WebkitUserSelect: 'none',
-                WebkitTouchCallout: 'none',
-                // Out of the way while a picture is being handled, so a drag
-                // on the picture is not also read as a pen stroke.
-                pointerEvents: handlingPictures ? 'none' : 'auto',
-              }}
+            <RiArrowUpLine
+              className={clsx(
+                'h-5 w-5 transition-transform duration-150',
+                scroll.readyToAdd ? 'text-primary' : 'text-base-content/40',
+              )}
             />
-            {/* Above the ink: light falls on top of what is on the page. */}
-            <LaserLayer
-              trail={ink.laserTrail}
-              settings={ink.laser}
-              width={size.width}
-              height={size.height}
-            />
-            {pictures.selected && pictures.selectedBounds && (
-              <NoteSelection
-                bounds={pictures.selectedBounds}
-                page={size}
-                onBegin={pictures.beginImageDrag}
-                onMove={pictures.moveImageTo}
-                onScale={pictures.scaleImageTo}
-                onEnd={pictures.endImageDrag}
-                onDelete={pictures.deleteSelectedImage}
-              />
-            )}
-            {ink.lassoing && ink.selectionBounds && (
-              <NoteSelection
-                bounds={ink.selectionBounds}
-                page={size}
-                onBegin={ink.beginSelectionDrag}
-                onMove={ink.moveSelectionTo}
-                onScale={ink.scaleSelectionTo}
-                onEnd={ink.endSelectionDrag}
-                onDelete={ink.deleteSelection}
-                onDuplicate={ink.duplicateSelection}
-              />
-            )}
+            <span className='text-base-content/55 text-xs'>
+              {scroll.readyToAdd ? _('Release to add a page') : _('Pull to add the new page')}
+            </span>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
